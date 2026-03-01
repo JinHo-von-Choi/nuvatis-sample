@@ -1,0 +1,139 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<!--
+  사용자 매퍼 XML (벤치마크용)
+  작성자: 최진호
+  작성일: 2026-03-01
+-->
+<mapper namespace="NuVatis.Benchmark.NuVatis.Mappers.IUserMapper">
+
+  <!-- ResultMap 정의 -->
+  <resultMap id="UserResult" type="NuVatis.Benchmark.Core.Models.User">
+    <id column="id" property="Id" />
+    <result column="user_name" property="UserName" />
+    <result column="email" property="Email" />
+    <result column="full_name" property="FullName" />
+    <result column="password_hash" property="PasswordHash" />
+    <result column="date_of_birth" property="DateOfBirth" />
+    <result column="phone_number" property="PhoneNumber" />
+    <result column="is_active" property="IsActive" />
+    <result column="created_at" property="CreatedAt" />
+    <result column="updated_at" property="UpdatedAt" />
+  </resultMap>
+
+  <resultMap id="UserWithAddressesResult" type="NuVatis.Benchmark.Core.Models.User">
+    <id column="id" property="Id" />
+    <result column="user_name" property="UserName" />
+    <result column="email" property="Email" />
+    <result column="full_name" property="FullName" />
+    <result column="password_hash" property="PasswordHash" />
+    <result column="date_of_birth" property="DateOfBirth" />
+    <result column="phone_number" property="PhoneNumber" />
+    <result column="is_active" property="IsActive" />
+    <result column="created_at" property="CreatedAt" />
+    <result column="updated_at" property="UpdatedAt" />
+    <collection property="Addresses" ofType="NuVatis.Benchmark.Core.Models.Address">
+      <id column="address_id" property="Id" />
+      <result column="user_id" property="UserId" />
+      <result column="address_type" property="AddressType" />
+      <result column="street_address" property="StreetAddress" />
+      <result column="city" property="City" />
+      <result column="state" property="State" />
+      <result column="postal_code" property="PostalCode" />
+      <result column="country" property="Country" />
+      <result column="is_default" property="IsDefault" />
+      <result column="address_created_at" property="CreatedAt" />
+      <result column="address_updated_at" property="UpdatedAt" />
+    </collection>
+  </resultMap>
+
+  <!-- Simple: GetById -->
+  <select id="GetByIdAsync" resultMap="UserResult">
+    SELECT id, user_name, email, full_name, password_hash, date_of_birth, phone_number, is_active, created_at, updated_at
+    FROM users
+    WHERE id = #{id}
+  </select>
+
+  <!-- Simple: WhereClause (이메일 도메인으로 검색) -->
+  <select id="GetByEmailDomainAsync" resultMap="UserResult">
+    SELECT id, user_name, email, full_name, password_hash, date_of_birth, phone_number, is_active, created_at, updated_at
+    FROM users
+    WHERE email LIKE '%@' || #{domain}
+    LIMIT 100
+  </select>
+
+  <!-- Simple: SimplePaging -->
+  <select id="GetPagedAsync" resultMap="UserResult">
+    SELECT id, user_name, email, full_name, password_hash, date_of_birth, phone_number, is_active, created_at, updated_at
+    FROM users
+    ORDER BY created_at DESC
+    LIMIT #{limit} OFFSET #{offset}
+  </select>
+
+  <!-- Simple: InsertSingle -->
+  <insert id="InsertAsync">
+    INSERT INTO users (user_name, email, full_name, password_hash, date_of_birth, phone_number, is_active, created_at, updated_at)
+    VALUES (#{UserName}, #{Email}, #{FullName}, #{PasswordHash}, #{DateOfBirth}, #{PhoneNumber}, #{IsActive}, #{CreatedAt}, #{UpdatedAt})
+    RETURNING id
+  </insert>
+
+  <!-- Simple: UpdateSingle -->
+  <update id="UpdateAsync">
+    UPDATE users
+    SET user_name    = #{UserName},
+        email        = #{Email},
+        full_name    = #{FullName},
+        phone_number = #{PhoneNumber},
+        is_active    = #{IsActive},
+        updated_at   = CURRENT_TIMESTAMP
+    WHERE id = #{Id}
+  </update>
+
+  <!-- Medium: TwoThreeJoin (User + Addresses) -->
+  <select id="GetWithAddressesAsync" resultMap="UserWithAddressesResult">
+    SELECT
+        u.id, u.user_name, u.email, u.full_name, u.password_hash, u.date_of_birth, u.phone_number, u.is_active, u.created_at, u.updated_at,
+        a.id AS address_id, a.user_id, a.address_type, a.street_address, a.city, a.state, a.postal_code, a.country, a.is_default,
+        a.created_at AS address_created_at, a.updated_at AS address_updated_at
+    FROM users u
+    LEFT JOIN addresses a ON u.id = a.user_id
+    WHERE u.id = #{id}
+  </select>
+
+  <!-- Medium: GroupByAggregate (국가별 사용자 수) -->
+  <select id="GetUserCountByCountryAsync" resultType="System.Collections.Generic.Dictionary`2[[System.String, System.Private.CoreLib],[System.Int32, System.Private.CoreLib]]">
+    SELECT a.country AS Key, COUNT(DISTINCT u.id) AS Value
+    FROM users u
+    INNER JOIN addresses a ON u.id = a.user_id
+    GROUP BY a.country
+    ORDER BY Value DESC
+  </select>
+
+  <!-- Medium: DynamicSearch (동적 검색) -->
+  <select id="SearchAsync" resultMap="UserResult">
+    SELECT id, user_name, email, full_name, password_hash, date_of_birth, phone_number, is_active, created_at, updated_at
+    FROM users
+    <where>
+      <if test="userName != null">
+        AND user_name LIKE '%' || #{userName} || '%'
+      </if>
+      <if test="email != null">
+        AND email LIKE '%' || #{email} || '%'
+      </if>
+      <if test="isActive != null">
+        AND is_active = #{isActive}
+      </if>
+    </where>
+    ORDER BY created_at DESC
+    LIMIT 1000
+  </select>
+
+  <!-- Medium: BulkInsert1K -->
+  <insert id="BulkInsertAsync">
+    INSERT INTO users (user_name, email, full_name, password_hash, date_of_birth, phone_number, is_active, created_at, updated_at)
+    VALUES
+    <foreach collection="users" item="user" separator=",">
+      (#{user.UserName}, #{user.Email}, #{user.FullName}, #{user.PasswordHash}, #{user.DateOfBirth}, #{user.PhoneNumber}, #{user.IsActive}, #{user.CreatedAt}, #{user.UpdatedAt})
+    </foreach>
+  </insert>
+
+</mapper>

@@ -1,0 +1,18 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/NuVatis.Sample.Console/NuVatis.Sample.Console.csproj" />
+    <Project Path="src/NuVatis.Sample.Core/NuVatis.Sample.Core.csproj" />
+    <Project Path="src/NuVatis.Sample.WebApi/NuVatis.Sample.WebApi.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/NuVatis.Sample.Tests/NuVatis.Sample.Tests.csproj" />
+  </Folder>
+  <Folder Name="/benchmarks/">
+    <Project Path="benchmarks/NuVatis.Benchmark.Core/NuVatis.Benchmark.Core.csproj" />
+    <Project Path="benchmarks/NuVatis.Benchmark.NuVatis/NuVatis.Benchmark.NuVatis.csproj" />
+    <Project Path="benchmarks/NuVatis.Benchmark.Dapper/NuVatis.Benchmark.Dapper.csproj" />
+    <Project Path="benchmarks/NuVatis.Benchmark.EfCore/NuVatis.Benchmark.EfCore.csproj" />
+    <Project Path="benchmarks/NuVatis.Benchmark.DataGen/NuVatis.Benchmark.DataGen.csproj" />
+    <Project Path="benchmarks/NuVatis.Benchmark.Runner/NuVatis.Benchmark.Runner.csproj" />
+  </Folder>
+</Solution>

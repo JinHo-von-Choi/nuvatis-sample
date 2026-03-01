@@ -1,0 +1,93 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<!--
+  상품 매퍼 XML (벤치마크용)
+  작성자: 최진호
+  작성일: 2026-03-01
+-->
+<mapper namespace="NuVatis.Benchmark.NuVatis.Mappers.IProductMapper">
+
+  <!-- ResultMap 정의 -->
+  <resultMap id="ProductResult" type="NuVatis.Benchmark.Core.Models.Product">
+    <id column="id" property="Id" />
+    <result column="category_id" property="CategoryId" />
+    <result column="product_name" property="ProductName" />
+    <result column="description" property="Description" />
+    <result column="price" property="Price" />
+    <result column="cost_price" property="CostPrice" />
+    <result column="stock_quantity" property="StockQuantity" />
+    <result column="sku" property="Sku" />
+    <result column="is_active" property="IsActive" />
+    <result column="created_at" property="CreatedAt" />
+    <result column="updated_at" property="UpdatedAt" />
+  </resultMap>
+
+  <!-- Simple: GetById -->
+  <select id="GetByIdAsync" resultMap="ProductResult">
+    SELECT id, category_id, product_name, description, price, cost_price, stock_quantity, sku, is_active, created_at, updated_at
+    FROM products
+    WHERE id = #{id}
+  </select>
+
+  <!-- Simple: WhereClause (카테고리별 상품) -->
+  <select id="GetByCategoryIdAsync" resultMap="ProductResult">
+    SELECT id, category_id, product_name, description, price, cost_price, stock_quantity, sku, is_active, created_at, updated_at
+    FROM products
+    WHERE category_id = #{categoryId}
+    ORDER BY created_at DESC
+    LIMIT 100
+  </select>
+
+  <!-- Medium: TwoThreeJoin (Product + Category + ProductImages) -->
+  <select id="GetWithDetailsAsync" resultType="NuVatis.Benchmark.Core.Models.Product">
+    SELECT DISTINCT
+        p.id, p.category_id, p.product_name, p.description, p.price, p.cost_price, p.stock_quantity, p.sku, p.is_active, p.created_at, p.updated_at
+    FROM products p
+    INNER JOIN categories c ON p.category_id = c.id
+    LEFT JOIN product_images pi ON p.id = pi.product_id
+    WHERE p.id = #{id}
+  </select>
+
+  <!-- Medium: GroupByAggregate (카테고리별 총 매출) -->
+  <select id="GetTotalSalesByCategoryAsync" resultType="System.Collections.Generic.Dictionary`2[[System.Int64, System.Private.CoreLib],[System.Decimal, System.Private.CoreLib]]">
+    SELECT
+        p.category_id AS Key,
+        SUM(oi.total_price) AS Value
+    FROM products p
+    INNER JOIN order_items oi ON p.id = oi.product_id
+    GROUP BY p.category_id
+    ORDER BY Value DESC
+  </select>
+
+  <!-- Complex: WindowFunctions (상품별 가격 순위) -->
+  <select id="GetProductsWithPriceRankAsync" resultType="dynamic">
+    SELECT
+        id,
+        product_name,
+        price,
+        category_id,
+        ROW_NUMBER() OVER (PARTITION BY category_id ORDER BY price DESC) AS price_rank,
+        RANK() OVER (ORDER BY price DESC) AS overall_rank,
+        DENSE_RANK() OVER (PARTITION BY category_id ORDER BY price DESC) AS dense_rank
+    FROM products
+    WHERE is_active = true
+    ORDER BY category_id, price_rank
+    LIMIT 1000
+  </select>
+
+  <!-- Stress: Query100K (모든 활성 상품 조회) -->
+  <select id="GetAllActiveProductsAsync" resultMap="ProductResult">
+    SELECT id, category_id, product_name, description, price, cost_price, stock_quantity, sku, is_active, created_at, updated_at
+    FROM products
+    WHERE is_active = true
+    ORDER BY created_at DESC
+  </select>
+
+  <!-- Simple: UpdateSingle (재고 업데이트) -->
+  <update id="UpdateStockAsync">
+    UPDATE products
+    SET stock_quantity = #{newStock},
+        updated_at = CURRENT_TIMESTAMP
+    WHERE id = #{productId}
+  </update>
+
+</mapper>

@@ -1,0 +1,102 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<!--
+  리뷰 매퍼 XML (벤치마크용)
+  작성자: 최진호
+  작성일: 2026-03-01
+-->
+<mapper namespace="NuVatis.Benchmark.NuVatis.Mappers.IReviewMapper">
+
+  <!-- ResultMap 정의 -->
+  <resultMap id="ReviewResult" type="NuVatis.Benchmark.Core.Models.Review">
+    <id column="id" property="Id" />
+    <result column="user_id" property="UserId" />
+    <result column="product_id" property="ProductId" />
+    <result column="rating" property="Rating" />
+    <result column="title" property="Title" />
+    <result column="content" property="Content" />
+    <result column="is_verified" property="IsVerified" />
+    <result column="helpful_count" property="HelpfulCount" />
+    <result column="created_at" property="CreatedAt" />
+    <result column="updated_at" property="UpdatedAt" />
+  </resultMap>
+
+  <!-- Simple: GetById -->
+  <select id="GetByIdAsync" resultMap="ReviewResult">
+    SELECT id, user_id, product_id, rating, title, content, is_verified, helpful_count, created_at, updated_at
+    FROM reviews
+    WHERE id = #{id}
+  </select>
+
+  <!-- Simple: WhereClause (상품별 리뷰) -->
+  <select id="GetByProductIdAsync" resultMap="ReviewResult">
+    SELECT id, user_id, product_id, rating, title, content, is_verified, helpful_count, created_at, updated_at
+    FROM reviews
+    WHERE product_id = #{productId}
+    ORDER BY created_at DESC
+    LIMIT 100
+  </select>
+
+  <!-- Medium: TwoThreeJoin (Review + User + Product) -->
+  <select id="GetWithDetailsAsync" resultType="NuVatis.Benchmark.Core.Models.Review">
+    SELECT
+        r.id, r.user_id, r.product_id, r.rating, r.title, r.content, r.is_verified, r.helpful_count, r.created_at, r.updated_at
+    FROM reviews r
+    INNER JOIN users u ON r.user_id = u.id
+    INNER JOIN products p ON r.product_id = p.id
+    WHERE r.product_id = #{productId}
+    ORDER BY r.created_at DESC
+    LIMIT #{limit}
+  </select>
+
+  <!-- Medium: GroupByAggregate (상품별 평균 평점) -->
+  <select id="GetAverageRatingByProductAsync" resultType="System.Collections.Generic.Dictionary`2[[System.Int64, System.Private.CoreLib],[System.Double, System.Private.CoreLib]]">
+    SELECT
+        product_id AS Key,
+        AVG(rating::decimal) AS Value
+    FROM reviews
+    GROUP BY product_id
+    HAVING COUNT(*) &gt;= 5
+    ORDER BY Value DESC
+  </select>
+
+  <!-- Complex: WindowFunctions (리뷰별 순위) -->
+  <select id="GetTopReviewsByProductAsync" resultType="dynamic">
+    WITH ranked_reviews AS (
+      SELECT
+          id,
+          product_id,
+          user_id,
+          rating,
+          helpful_count,
+          ROW_NUMBER() OVER (PARTITION BY product_id ORDER BY helpful_count DESC, created_at DESC) AS rank
+      FROM reviews
+      WHERE is_verified = true
+    )
+    SELECT
+        product_id,
+        user_id,
+        rating,
+        helpful_count,
+        rank
+    FROM ranked_reviews
+    WHERE rank &lt;= #{topN}
+    ORDER BY product_id, rank
+  </select>
+
+  <!-- Simple: InsertSingle -->
+  <insert id="InsertAsync">
+    INSERT INTO reviews (user_id, product_id, rating, title, content, is_verified, helpful_count, created_at, updated_at)
+    VALUES (#{UserId}, #{ProductId}, #{Rating}, #{Title}, #{Content}, #{IsVerified}, #{HelpfulCount}, #{CreatedAt}, #{UpdatedAt})
+    RETURNING id
+  </insert>
+
+  <!-- Medium: BulkInsert1K -->
+  <insert id="BulkInsertAsync">
+    INSERT INTO reviews (user_id, product_id, rating, title, content, is_verified, helpful_count, created_at, updated_at)
+    VALUES
+    <foreach collection="reviews" item="review" separator=",">
+      (#{review.UserId}, #{review.ProductId}, #{review.Rating}, #{review.Title}, #{review.Content}, #{review.IsVerified}, #{review.HelpfulCount}, #{review.CreatedAt}, #{review.UpdatedAt})
+    </foreach>
+  </insert>
+
+</mapper>

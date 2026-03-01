@@ -1,0 +1,1374 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<!--
+  ==================================================================================
+  NuVatis 주문 매퍼 XML - 복잡한 관계 매핑 완전 가이드
+  ==================================================================================
+
+  이 파일은 NuVatis의 가장 강력한 기능인 **association**과 **collection**을 활용한
+  복잡한 관계 매핑을 설명합니다. 주문 도메인은 실무에서 가장 흔한 시나리오이며,
+  1:1 관계, 1:N 관계, N:M 관계가 모두 등장합니다.
+
+  ==================================================================================
+  핵심 개념: ResultMap의 관계 매핑
+  ==================================================================================
+
+  1. **association** (1:1 관계 매핑)
+     - 하나의 엔티티가 다른 하나의 엔티티를 참조
+     - 예: Order → User (주문은 한 명의 사용자에게 속함)
+     - SQL: INNER JOIN 또는 LEFT JOIN 사용
+     - C# 속성 타입: User (단일 객체)
+
+  2. **collection** (1:N 관계 매핑)
+     - 하나의 엔티티가 여러 엔티티를 참조
+     - 예: Order → OrderItem[] (주문은 여러 주문상세를 가짐)
+     - SQL: LEFT JOIN 사용 (주문상세가 없을 수도 있음)
+     - C# 속성 타입: IList<OrderItem> (컬렉션)
+
+  3. **nested association** (중첩된 관계)
+     - collection 안의 association
+     - 예: Order → OrderItem[] → Product (주문상세는 각각 상품 정보를 가짐)
+     - SQL: 여러 테이블을 한 번에 JOIN
+     - 성능 주의: N+1 문제 방지 가능
+
+  ==================================================================================
+  JOIN 방식 선택 기준
+  ==================================================================================
+
+  INNER JOIN:
+    - 양쪽 테이블에 모두 데이터가 존재해야 결과 반환
+    - 예: orders INNER JOIN users
+      → 사용자가 삭제된 주문은 조회되지 않음
+    - 사용 시기: 외래키 제약 조건이 있고, NULL이 불가능한 경우
+
+  LEFT JOIN:
+    - 왼쪽 테이블은 항상 반환, 오른쪽 테이블은 있으면 JOIN
+    - 예: orders LEFT JOIN order_items
+      → 주문상세가 없는 주문도 조회됨
+    - 사용 시기: 선택적 관계, 또는 1:N 관계
+
+  성능 차이:
+    - INNER JOIN이 약간 더 빠름 (인덱스 활용 유리)
+    - 하지만 실무에서는 비즈니스 로직이 우선
+
+  ==================================================================================
+  N+1 문제와 해결
+  ==================================================================================
+
+  **N+1 문제란?**
+  - 주문 목록 N개를 조회한 후, 각 주문의 상세정보를 개별 쿼리로 조회
+  - 결과: 1 (주문 목록 쿼리) + N (각 주문의 상세 쿼리) = 총 N+1번의 쿼리
+  - 성능: 주문 100개 → 101번의 쿼리 실행 (비효율)
+
+  **해결 방법:**
+  1. collection 사용 (이 파일의 OrderWithItemsResult)
+     → 한 번의 쿼리로 주문 + 주문상세 + 상품 정보 모두 조회
+  2. 단점: 데이터 중복 (주문 정보가 주문상세 개수만큼 반복)
+  3. 장점: 쿼리 횟수 최소화 (1번)
+
+  **언제 사용?**
+  - 주문상세가 적을 때 (평균 1-10개): collection 사용
+  - 주문상세가 많을 때 (100개 이상): 별도 쿼리 또는 페이징
+
+  ==================================================================================
+  트랜잭션 처리 패턴
+  ==================================================================================
+
+  주문 생성 시나리오:
+  1. orders 테이블에 INSERT (주문 기본 정보)
+  2. order_items 테이블에 INSERT (주문상세, 여러 건)
+  3. products 테이블에 UPDATE (재고 차감)
+
+  C# 트랜잭션 코드 예제:
+
+      using var transaction = _connection.BeginTransaction();
+      try
+      {
+          // 1. 주문 생성
+          _orderMapper.Insert(order);
+
+          // 2. 주문상세 생성 + 재고 차감
+          foreach (var item in orderItems)
+          {
+              _orderMapper.InsertItem(item);
+              _productMapper.UpdateStock(item.ProductId, -item.Quantity);
+          }
+
+          transaction.Commit();
+      }
+      catch
+      {
+          transaction.Rollback();
+          throw;
+      }
+
+  주의사항:
+  - 트랜잭션 없이 실행하면 주문은 생성되었는데 재고는 차감 안 될 수 있음
+  - ACID 보장 필요 (Atomicity: 전부 성공 또는 전부 실패)
+
+  ==================================================================================
+  외래키 제약 조건과 삭제 정책
+  ==================================================================================
+
+  orders.user_id → users.id (외래키)
+  order_items.order_id → orders.id (외래키)
+  order_items.product_id → products.id (외래키)
+
+  삭제 시나리오:
+  1. CASCADE: 주문 삭제 시 주문상세도 자동 삭제
+  2. RESTRICT: 주문상세가 있으면 주문 삭제 불가 (무결성 보호)
+  3. SET NULL: 주문 삭제 시 주문상세의 order_id를 NULL로 (비추천)
+
+  이 샘플에서는 수동 삭제:
+      _orderMapper.DeleteItems(orderId);  // 먼저 주문상세 삭제
+      _orderMapper.Delete(orderId);       // 그 다음 주문 삭제
+
+  이유: 명시적 제어, 감사 로그 기록 가능
+
+  ==================================================================================
+  컬럼 별칭(Alias) 전략
+  ==================================================================================
+
+  여러 테이블을 JOIN할 때 컬럼명이 중복되는 문제:
+  - users.id, orders.id, products.id → 모두 "id"
+
+  해결: AS 별칭 사용
+      SELECT
+          u.id AS user_id,
+          o.id AS order_id,
+          oi.id AS item_id,
+          p.id AS product_id
+
+  ResultMap에서 column 속성으로 매핑:
+      <result column="user_id" property="Id" />
+
+  일관된 별칭 규칙:
+  - 사용자 컬럼: user_* (user_id, user_name, user_email)
+  - 주문상세 컬럼: item_* (item_id, item_quantity)
+  - 상품 컬럼: product_* (product_id, product_name)
+
+  ==================================================================================
+
+  작성자: 최진호
+  작성일: 2026-03-01
+  라이센스: MIT
+
+  ==================================================================================
+-->
+<mapper namespace="NuVatis.Sample.Core.Mappers.IOrderMapper">
+
+  <!--
+    ==================================================================================
+    ResultMap 1: OrderResult (기본 주문 정보)
+    ==================================================================================
+
+    목적: 주문 테이블의 컬럼만 매핑 (관계 없음)
+    사용 시기: 단순 주문 목록 조회, 집계 쿼리
+
+    C# 클래스 구조:
+        public class Order
+        {
+            public int Id { get; set; }
+            public string OrderNo { get; set; }      // 주문번호 (예: ORD-20260301-0001)
+            public int UserId { get; set; }          // 외래키 (users.id)
+            public decimal TotalAmount { get; set; } // 총 주문 금액
+            public string Status { get; set; }       // pending, paid, shipped, delivered, cancelled
+            public DateTime OrderDate { get; set; }  // 주문 일시
+            public DateTime? ShippedDate { get; set; } // 배송 일시 (nullable)
+            public DateTime CreatedAt { get; set; }
+            public DateTime? UpdatedAt { get; set; }
+        }
+
+    성능 특성:
+    - 매핑 속도: 빠름 (단일 테이블, 관계 없음)
+    - 메모리: 최소 (Order 객체만)
+    - 네트워크: 최소 (컬럼 9개)
+
+    언제 사용:
+    - 주문 목록 화면 (사용자 정보 불필요)
+    - 대시보드 집계 (총 주문 수, 금액 합계)
+    - 내부 처리 (상태 업데이트, 삭제)
+
+    ==================================================================================
+  -->
+  <resultMap id="OrderResult" type="NuVatis.Sample.Core.Models.Order">
+    <id column="id" property="Id" />                        <!-- PK, 주문 고유 ID -->
+    <result column="order_no" property="OrderNo" />         <!-- 주문번호 (비즈니스 키) -->
+    <result column="user_id" property="UserId" />           <!-- FK, 주문한 사용자 ID -->
+    <result column="total_amount" property="TotalAmount" /> <!-- 총 금액 (DECIMAL) -->
+    <result column="status" property="Status" />            <!-- 주문 상태 (VARCHAR) -->
+    <result column="order_date" property="OrderDate" />     <!-- 주문 일시 -->
+    <result column="shipped_date" property="ShippedDate" /> <!-- 배송 일시 (NULL 가능) -->
+    <result column="created_at" property="CreatedAt" />     <!-- 생성 일시 -->
+    <result column="updated_at" property="UpdatedAt" />     <!-- 수정 일시 -->
+  </resultMap>
+
+  <!--
+    ==================================================================================
+    ResultMap 2: OrderWithUserResult (주문 + 사용자 정보) - association 활용
+    ==================================================================================
+
+    목적: 주문과 함께 주문한 사용자 정보도 함께 조회
+    사용 시기: 주문 상세 화면, 관리자 주문 목록
+
+    **association이란?**
+    - 1:1 관계를 표현하는 ResultMap 태그
+    - 하나의 Order는 하나의 User와 연결
+    - SQL에서 INNER JOIN 또는 LEFT JOIN으로 두 테이블을 연결
+    - NuVatis가 자동으로 User 객체를 생성하고 Order.User 속성에 할당
+
+    C# 클래스 구조:
+        public class Order
+        {
+            // ... 기본 속성들 ...
+            public User User { get; set; }  // association으로 채워짐
+        }
+
+        public class User
+        {
+            public int Id { get; set; }
+            public string UserName { get; set; }
+            public string Email { get; set; }
+            public string FullName { get; set; }
+        }
+
+    SQL 구조:
+        SELECT
+            o.id, o.order_no, ...,
+            u.user_name, u.email AS user_email, u.full_name AS user_full_name
+        FROM orders o
+        INNER JOIN users u ON o.user_id = u.id
+
+    **컬럼명 중복 문제:**
+    - users.id와 orders.id가 모두 "id"
+    - 해결: AS 별칭 사용 (user_id, user_email, user_full_name)
+    - association 내부의 column 속성은 별칭을 참조
+
+    **association vs 별도 쿼리:**
+
+    association 사용 (이 방식):
+    - 쿼리 횟수: 1번 (JOIN)
+    - 네트워크: 1회
+    - 성능: 빠름 (특히 목록 조회)
+    - 단점: 데이터 중복 (주문 10개 → User 정보가 10번 반복)
+
+    별도 쿼리 (N+1):
+    - 쿼리 횟수: 1 (주문) + N (각 사용자)
+    - 네트워크: N+1회
+    - 성능: 느림
+    - 장점: 데이터 중복 없음
+
+    결론: **association 사용 권장** (현대 DB는 JOIN이 효율적)
+
+    **javaType 속성:**
+    - NuVatis는 MyBatis에서 파생되었으므로 속성명이 "javaType"
+    - 실제로는 C# 타입을 지정 (NuVatis.Sample.Core.Models.User)
+    - 컴파일 타임에 타입 체크됨 (Source Generator)
+
+    성능 특성:
+    - 매핑 속도: 중간 (JOIN + 객체 2개 생성)
+    - 메모리: 중간 (Order + User)
+    - 네트워크: 중간 (컬럼 약 13개)
+
+    언제 사용:
+    - 주문 목록에서 주문자 이름 표시
+    - 주문 상세에서 사용자 정보 표시
+    - 관리자 대시보드
+
+    ==================================================================================
+  -->
+  <resultMap id="OrderWithUserResult" type="NuVatis.Sample.Core.Models.Order">
+    <!-- 주문 기본 정보 (orders 테이블) -->
+    <id column="id" property="Id" />
+    <result column="order_no" property="OrderNo" />
+    <result column="user_id" property="UserId" />
+    <result column="total_amount" property="TotalAmount" />
+    <result column="status" property="Status" />
+    <result column="order_date" property="OrderDate" />
+    <result column="shipped_date" property="ShippedDate" />
+    <result column="created_at" property="CreatedAt" />
+    <result column="updated_at" property="UpdatedAt" />
+
+    <!--
+      association: 1:1 관계 매핑
+      → Order.User 속성에 User 객체를 할당
+
+      주의사항:
+      1. column은 SQL의 별칭을 정확히 참조해야 함
+      2. javaType은 C# 타입의 전체 네임스페이스 포함
+      3. association 내부에도 <id> 태그 사용 (성능 최적화)
+         → NuVatis가 동일 User 객체를 재사용 (메모리 절약)
+    -->
+    <association property="User" javaType="NuVatis.Sample.Core.Models.User">
+      <id column="user_id" property="Id" />              <!-- users.id (JOIN 키) -->
+      <result column="user_name" property="UserName" />  <!-- users.user_name -->
+      <result column="user_email" property="Email" />    <!-- users.email AS user_email -->
+      <result column="user_full_name" property="FullName" /> <!-- users.full_name AS user_full_name -->
+    </association>
+  </resultMap>
+
+  <!--
+    ==================================================================================
+    ResultMap 3: OrderWithItemsResult (주문 + 주문상세 + 상품) - collection + nested association
+    ==================================================================================
+
+    목적: 주문의 모든 정보를 한 번의 쿼리로 조회 (N+1 문제 해결)
+    사용 시기: 주문 상세 화면, 주문서 출력, 송장 발행
+
+    **collection이란?**
+    - 1:N 관계를 표현하는 ResultMap 태그
+    - 하나의 Order는 여러 OrderItem을 가짐
+    - SQL에서 LEFT JOIN으로 order_items 테이블과 연결
+    - NuVatis가 자동으로 OrderItem 리스트를 생성하고 Order.Items 속성에 할당
+
+    **nested association이란?**
+    - collection 안의 association
+    - 각 OrderItem은 하나의 Product를 참조
+    - SQL에서 추가로 products 테이블도 LEFT JOIN
+    - 결과: Order → OrderItem[] → Product (3단계 중첩)
+
+    C# 클래스 구조:
+        public class Order
+        {
+            // ... 기본 속성들 ...
+            public User User { get; set; }              // association
+            public IList<OrderItem> Items { get; set; } // collection
+        }
+
+        public class OrderItem
+        {
+            public int Id { get; set; }
+            public int OrderId { get; set; }
+            public int ProductId { get; set; }
+            public int Quantity { get; set; }
+            public decimal UnitPrice { get; set; }
+            public decimal Subtotal { get; set; }
+            public Product Product { get; set; }        // nested association
+        }
+
+        public class Product
+        {
+            public int Id { get; set; }
+            public string ProductCode { get; set; }
+            public string ProductName { get; set; }
+            public decimal Price { get; set; }
+            public string Category { get; set; }
+        }
+
+    SQL 구조 (4개 테이블 JOIN):
+        SELECT
+            o.id, o.order_no, ...,
+            u.user_name, u.email AS user_email, ...,
+            oi.id AS item_id, oi.quantity AS item_quantity, ...,
+            p.id AS product_id, p.product_name, ...
+        FROM orders o
+        INNER JOIN users u ON o.user_id = u.id
+        LEFT JOIN order_items oi ON o.id = oi.order_id
+        LEFT JOIN products p ON oi.product_id = p.id
+
+    **왜 LEFT JOIN?**
+    - order_items: 주문상세가 없을 수도 있음 (주문 직후 상태)
+    - products: 상품이 삭제되었을 수도 있음 (히스토리 보존)
+    - LEFT JOIN 사용 시 Orders는 항상 반환됨
+
+    **데이터 중복 문제:**
+
+    주문 1개, 주문상세 3개인 경우 SQL 결과:
+
+    | order_id | order_no | item_id | product_name |
+    |----------|----------|---------|--------------|
+    | 1        | ORD-001  | 10      | 노트북       |
+    | 1        | ORD-001  | 11      | 마우스       |
+    | 1        | ORD-001  | 12      | 키보드       |
+
+    → 주문 정보(order_id, order_no)가 3번 반복됨
+    → 네트워크 대역폭 낭비
+
+    하지만 NuVatis가 자동으로 그룹화:
+    - Order 객체 1개 생성
+    - OrderItem 객체 3개 생성
+    - Order.Items에 3개의 OrderItem 할당
+
+    **성능 분석:**
+
+    장점:
+    - 쿼리 횟수: 1번 (JOIN 사용)
+    - N+1 문제 해결
+    - 코드 간결 (수동 그룹화 불필요)
+
+    단점:
+    - 네트워크: 데이터 중복 전송 (주문상세 개수만큼)
+    - 메모리: 중복 데이터 파싱 (NuVatis 내부에서 필터링)
+    - DB 부하: 큰 JOIN (인덱스 필수)
+
+    성능 기준:
+    - 주문상세 1-10개: 이 방식 권장 (빠름)
+    - 주문상세 10-100개: 상황에 따라 판단
+    - 주문상세 100개 이상: 별도 쿼리 또는 페이징 권장
+
+    **ofType vs javaType:**
+    - collection은 `ofType` 사용 (컬렉션의 요소 타입)
+    - association은 `javaType` 사용 (단일 객체 타입)
+    - 혼동 주의!
+
+    **<id> 태그의 중요성:**
+    - collection 내부에 <id> 필수
+    - NuVatis가 이를 기준으로 OrderItem 객체 구분
+    - <id> 없으면 중복 데이터 생성 가능
+
+    예시:
+        <!-- 잘못된 예 (id 없음) -->
+        <collection property="Items" ofType="OrderItem">
+            <result column="item_id" property="Id" />  ← 이러면 안 됨!
+        </collection>
+
+        <!-- 올바른 예 -->
+        <collection property="Items" ofType="OrderItem">
+            <id column="item_id" property="Id" />  ← id 태그 사용
+        </collection>
+
+    언제 사용:
+    - 주문 상세 화면 (주문 + 주문상세 + 상품 정보 모두 필요)
+    - 주문서 PDF 생성
+    - 송장 발행
+    - 주문 확인 이메일
+
+    언제 사용하지 말아야 할까:
+    - 주문 목록 화면 (너무 많은 정보)
+    - 대량 주문 조회 (메모리 부족 위험)
+    - 주문상세가 100개 이상인 경우
+
+    ==================================================================================
+  -->
+  <resultMap id="OrderWithItemsResult" type="NuVatis.Sample.Core.Models.Order">
+    <!-- 주문 기본 정보 (orders 테이블) -->
+    <id column="id" property="Id" />                        <!-- PK, 그룹화 기준 -->
+    <result column="order_no" property="OrderNo" />
+    <result column="user_id" property="UserId" />
+    <result column="total_amount" property="TotalAmount" />
+    <result column="status" property="Status" />
+    <result column="order_date" property="OrderDate" />
+    <result column="shipped_date" property="ShippedDate" />
+    <result column="created_at" property="CreatedAt" />
+    <result column="updated_at" property="UpdatedAt" />
+
+    <!--
+      association: 주문한 사용자 정보 (1:1)
+      → Order.User 속성
+    -->
+    <association property="User" javaType="NuVatis.Sample.Core.Models.User">
+      <id column="user_id" property="Id" />
+      <result column="user_name" property="UserName" />
+      <result column="user_email" property="Email" />
+      <result column="user_full_name" property="FullName" />
+    </association>
+
+    <!--
+      collection: 주문상세 목록 (1:N)
+      → Order.Items 속성 (IList<OrderItem>)
+
+      ofType: 컬렉션 요소의 타입 (OrderItem)
+      주의: javaType이 아니라 ofType 사용!
+
+      NuVatis 처리 과정:
+      1. order_id로 그룹화
+      2. 각 행(row)마다 OrderItem 객체 생성
+      3. item_id(<id> 태그)로 중복 제거
+      4. Order.Items 리스트에 추가
+    -->
+    <collection property="Items" ofType="NuVatis.Sample.Core.Models.OrderItem">
+      <!-- 주문상세 기본 정보 (order_items 테이블) -->
+      <id column="item_id" property="Id" />                        <!-- PK, 중복 제거 기준 (필수!) -->
+      <result column="item_order_id" property="OrderId" />         <!-- FK (orders.id) -->
+      <result column="item_product_id" property="ProductId" />     <!-- FK (products.id) -->
+      <result column="item_quantity" property="Quantity" />        <!-- 주문 수량 -->
+      <result column="item_unit_price" property="UnitPrice" />     <!-- 주문 당시 단가 -->
+      <result column="item_subtotal" property="Subtotal" />        <!-- 소계 (단가 * 수량) -->
+
+      <!--
+        nested association: 주문상세의 상품 정보 (1:1)
+        → OrderItem.Product 속성
+
+        3단계 중첩: Order → OrderItem → Product
+        SQL: orders JOIN order_items JOIN products
+
+        왜 필요한가?
+        - 주문 당시의 상품 정보 표시 (상품명, 가격 등)
+        - 현재 products 테이블과 다를 수 있음 (가격 변동)
+        - 하지만 주문서에는 주문 당시의 정보 필요
+
+        실무 팁:
+        - order_items에 product_name_snapshot, price_snapshot 등 저장하는 것도 방법
+        - 하지만 이 예제에서는 products 테이블 JOIN으로 처리
+      -->
+      <association property="Product" javaType="NuVatis.Sample.Core.Models.Product">
+        <id column="product_id" property="Id" />               <!-- products.id -->
+        <result column="product_code" property="ProductCode" /> <!-- 상품 코드 -->
+        <result column="product_name" property="ProductName" /> <!-- 상품명 -->
+        <result column="product_price" property="Price" />      <!-- 현재 가격 (주문 당시와 다를 수 있음) -->
+        <result column="product_category" property="Category" /> <!-- 카테고리 -->
+      </association>
+    </collection>
+  </resultMap>
+
+  <!--
+    ==================================================================================
+    GetById: 주문 ID로 단일 주문 조회 (사용자 정보 포함)
+    ==================================================================================
+
+    사용 목적:
+    - 주문 번호 클릭 시 주문 기본 정보 표시
+    - 주문 상태 확인 (pending, paid, shipped, etc.)
+    - 주문한 사용자 정보 표시 (이름, 이메일)
+
+    SQL 구조:
+    - INNER JOIN users: 사용자 정보 필수 (사용자가 없는 주문은 조회 안 됨)
+    - WHERE o.id = #{Id}: PK로 검색 (인덱스 자동 사용, 매우 빠름)
+
+    ResultMap: OrderWithUserResult
+    - Order 객체 + User 객체 (association)
+    - OrderItem은 포함 안 됨 (가벼운 조회)
+
+    성능:
+    - 쿼리 시간: <1ms (PK 검색)
+    - 인덱스: orders.id (PK, 자동 인덱스)
+    - 네트워크: 약 13개 컬럼 (Order 9개 + User 4개)
+
+    C# 사용 예제:
+        var order = await _orderMapper.GetById(123);
+        if (order == null)
+            return NotFound();
+
+        Console.WriteLine($"주문번호: {order.OrderNo}");
+        Console.WriteLine($"주문자: {order.User.FullName}");
+        Console.WriteLine($"상태: {order.Status}");
+        Console.WriteLine($"금액: {order.TotalAmount:C}");
+
+    반환 값:
+    - 성공: Order 객체 (User 속성 채워짐)
+    - 실패: null (존재하지 않는 ID)
+
+    주의사항:
+    - 주문상세(OrderItem) 정보는 포함 안 됨
+    - 주문상세 필요하면 GetByIdWithItems 사용
+    - INNER JOIN 사용 → 사용자가 삭제된 주문은 조회 안 됨
+      (만약 삭제된 사용자의 주문도 조회 필요하면 LEFT JOIN 사용)
+
+    실무 팁:
+    - 주문 목록에서 특정 주문 클릭 시 사용
+    - 가벼운 조회이므로 빠름
+    - 주문서 출력 전에 먼저 이 쿼리로 확인 후 GetByIdWithItems 호출
+
+    ==================================================================================
+  -->
+  <select id="GetById" resultMap="OrderWithUserResult">
+    SELECT
+      o.id, o.order_no, o.user_id, o.total_amount, o.status,
+      o.order_date, o.shipped_date, o.created_at, o.updated_at,
+      u.user_name, u.email AS user_email, u.full_name AS user_full_name
+    FROM orders o
+    INNER JOIN users u ON o.user_id = u.id  -- 사용자 정보 필수 (INNER JOIN)
+    WHERE o.id = #{Id}                      -- PK 검색 (매우 빠름)
+  </select>
+
+  <!--
+    ==================================================================================
+    GetByIdWithItems: 주문의 모든 정보 조회 (사용자 + 주문상세 + 상품)
+    ==================================================================================
+
+    사용 목적:
+    - 주문 상세 화면 (전체 정보 필요)
+    - 주문서 PDF 생성
+    - 송장 발행
+    - 주문 확인 이메일
+
+    SQL 구조:
+    - 4개 테이블 JOIN (orders, users, order_items, products)
+    - INNER JOIN users: 사용자 정보 필수
+    - LEFT JOIN order_items: 주문상세 선택 (주문 직후 상태)
+    - LEFT JOIN products: 상품 정보 선택 (상품 삭제된 경우)
+
+    **왜 LEFT JOIN?**
+    - order_items: 주문은 생성되었지만 주문상세가 아직 없을 수 있음
+    - products: 상품이 삭제되었어도 주문 이력은 보존
+
+    **컬럼 별칭 전략:**
+    - 4개 테이블에서 모두 "id" 컬럼 존재
+    - 해결: AS 별칭 사용
+      - o.id (주문 ID, 별칭 없음 → ResultMap의 "id")
+      - oi.id AS item_id (주문상세 ID)
+      - p.id AS product_id (상품 ID)
+      - u.id는 선택 안 함 (user_id로 충분)
+
+    **일관된 별칭 규칙:**
+    - 사용자: user_* (user_name, user_email, user_full_name)
+    - 주문상세: item_* (item_id, item_order_id, item_quantity, ...)
+    - 상품: product_* (product_id, product_code, product_name, ...)
+
+    ResultMap: OrderWithItemsResult
+    - Order 객체
+      - User 객체 (association)
+      - OrderItem[] 컬렉션 (collection)
+        - Product 객체 (nested association)
+
+    **데이터 중복 예시:**
+
+    주문 1개, 주문상세 3개인 경우 SQL 결과 (단순화):
+
+    | id | order_no | item_id | item_quantity | product_name |
+    |----|----------|---------|---------------|--------------|
+    | 1  | ORD-001  | 10      | 2             | 노트북       |
+    | 1  | ORD-001  | 11      | 1             | 마우스       |
+    | 1  | ORD-001  | 12      | 3             | 키보드       |
+
+    → 주문 정보(id=1, order_no=ORD-001)가 3번 반복
+    → 네트워크: 3행 전송
+
+    NuVatis 자동 그룹화 결과:
+    - Order 객체 1개 (id=1, order_no=ORD-001)
+    - Order.Items = [
+        OrderItem(id=10, quantity=2, Product(name=노트북)),
+        OrderItem(id=11, quantity=1, Product(name=마우스)),
+        OrderItem(id=12, quantity=3, Product(name=키보드))
+      ]
+
+    **성능 분석:**
+
+    장점:
+    - 쿼리 횟수: 1번 (JOIN 사용)
+    - N+1 문제 완전 해결
+    - 코드 간결 (수동 그룹화 불필요)
+
+    단점:
+    - 네트워크: 데이터 중복 전송 (주문상세 개수만큼)
+    - 파싱 시간: NuVatis가 중복 데이터 필터링 (약간의 오버헤드)
+    - DB 부하: 4개 테이블 JOIN (복잡한 실행 계획)
+
+    **인덱스 요구사항:**
+    - orders.id (PK, 자동)
+    - users.id (PK, 자동)
+    - order_items.order_id (FK 인덱스 필수!)
+    - order_items.product_id (FK 인덱스 필수!)
+    - products.id (PK, 자동)
+
+    인덱스 확인 SQL:
+        SHOW INDEX FROM order_items WHERE Key_name = 'order_id';
+
+    인덱스 생성 (없는 경우):
+        CREATE INDEX idx_order_items_order_id ON order_items(order_id);
+        CREATE INDEX idx_order_items_product_id ON order_items(product_id);
+
+    **성능 기준:**
+    - 주문상세 1-10개: <10ms (권장)
+    - 주문상세 10-50개: 10-50ms (허용)
+    - 주문상세 50-100개: 50-200ms (주의)
+    - 주문상세 100개 이상: 별도 쿼리 권장
+
+    C# 사용 예제:
+        var order = await _orderMapper.GetByIdWithItems(123);
+        if (order == null)
+            return NotFound();
+
+        Console.WriteLine($"주문번호: {order.OrderNo}");
+        Console.WriteLine($"주문자: {order.User.FullName}");
+        Console.WriteLine($"주문상세 {order.Items.Count}개:");
+
+        foreach (var item in order.Items)
+        {
+            Console.WriteLine($"  - {item.Product.ProductName} x {item.Quantity} = {item.Subtotal:C}");
+        }
+
+        Console.WriteLine($"총 금액: {order.TotalAmount:C}");
+
+    반환 값:
+    - 성공: Order 객체 (User, Items, Items[].Product 모두 채워짐)
+    - Items가 비어있으면: Items.Count == 0 (null 아님)
+    - 실패: null (존재하지 않는 ID)
+
+    주의사항:
+    - 주문상세가 100개 이상이면 이 쿼리 사용 금지
+      → 대신 GetById + 별도 페이징 쿼리 사용
+    - LEFT JOIN 사용 → 상품이 삭제되어도 주문은 조회됨
+      → item.Product == null 체크 필요
+    - 데이터 중복으로 네트워크 대역폭 사용 (모바일 환경 주의)
+
+    실무 팁:
+    - 주문서 PDF 생성 시 사용 (모든 정보 필요)
+    - 주문 목록 화면에서는 사용 금지 (너무 무거움)
+    - 캐싱 권장 (주문 정보는 자주 변경되지 않음)
+    - 트래픽 많으면 Redis 캐싱 고려
+
+    ==================================================================================
+  -->
+  <select id="GetByIdWithItems" resultMap="OrderWithItemsResult">
+    SELECT
+      -- 주문 기본 정보 (orders 테이블)
+      o.id, o.order_no, o.user_id, o.total_amount, o.status,
+      o.order_date, o.shipped_date, o.created_at, o.updated_at,
+
+      -- 사용자 정보 (users 테이블, 별칭: user_*)
+      u.user_name, u.email AS user_email, u.full_name AS user_full_name,
+
+      -- 주문상세 정보 (order_items 테이블, 별칭: item_*)
+      oi.id AS item_id, oi.order_id AS item_order_id,
+      oi.product_id AS item_product_id, oi.quantity AS item_quantity,
+      oi.unit_price AS item_unit_price, oi.subtotal AS item_subtotal,
+
+      -- 상품 정보 (products 테이블, 별칭: product_*)
+      p.id AS product_id, p.product_code, p.product_name,
+      p.price AS product_price, p.category AS product_category
+
+    FROM orders o
+    INNER JOIN users u ON o.user_id = u.id         -- 사용자 정보 필수
+    LEFT JOIN order_items oi ON o.id = oi.order_id -- 주문상세 선택 (없을 수도 있음)
+    LEFT JOIN products p ON oi.product_id = p.id   -- 상품 정보 선택 (삭제되었을 수도 있음)
+    WHERE o.id = #{Id}                             -- PK 검색
+    -- ORDER BY oi.id ASC                          -- 주문상세 정렬 (필요시 주석 해제)
+  </select>
+
+  <!--
+    ==================================================================================
+    GetByUserId: 특정 사용자의 모든 주문 조회
+    ==================================================================================
+
+    사용 목적:
+    - 마이페이지 "주문 내역" 화면
+    - 고객 센터에서 사용자 주문 조회
+    - 사용자별 주문 통계
+
+    SQL 구조:
+    - WHERE o.user_id = #{UserId}: FK로 검색
+    - ORDER BY o.created_at DESC: 최신 주문 먼저
+    - INNER JOIN users: 사용자 정보 포함
+
+    ResultMap: OrderWithUserResult
+    - 주문 목록 (List<Order>)
+    - 각 Order는 User 정보 포함 (association)
+    - 주문상세는 포함 안 됨 (목록 화면용)
+
+    **인덱스 필수:**
+        CREATE INDEX idx_orders_user_id_created_at
+        ON orders(user_id, created_at DESC);
+
+    이유:
+    - user_id로 필터링
+    - created_at으로 정렬
+    - 복합 인덱스로 빠른 검색 + 정렬
+
+    인덱스 없으면:
+    - Full Table Scan (모든 주문 검색)
+    - 파일 정렬 (Filesort)
+    - 성능: 수백 ms ~ 수 초
+
+    인덱스 있으면:
+    - Index Seek (인덱스 직접 검색)
+    - 정렬 불필요 (인덱스가 이미 정렬됨)
+    - 성능: <10ms
+
+    성능:
+    - 쿼리 시간: <10ms (인덱스 사용 시)
+    - 반환 건수: 평균 사용자당 10-100건
+    - 페이징 권장: 10,000건 이상이면 LIMIT/OFFSET 추가
+
+    C# 사용 예제:
+        var orders = await _orderMapper.GetByUserId(userId);
+
+        Console.WriteLine($"총 주문 {orders.Count}개");
+        foreach (var order in orders)
+        {
+            Console.WriteLine($"{order.OrderDate:yyyy-MM-dd} - {order.OrderNo} - {order.Status} - {order.TotalAmount:C}");
+        }
+
+    페이징 예제 (수정 필요하면):
+        <select id="GetByUserIdPaged" resultMap="OrderWithUserResult">
+          SELECT ...
+          FROM orders o
+          INNER JOIN users u ON o.user_id = u.id
+          WHERE o.user_id = #{UserId}
+          ORDER BY o.created_at DESC
+          LIMIT #{PageSize} OFFSET #{Offset}
+        </select>
+
+    반환 값:
+    - 성공: List<Order> (비어있을 수 있음)
+    - 주문 없으면: 빈 리스트 (Count == 0)
+    - 사용자 없으면: 빈 리스트 (INNER JOIN 때문)
+
+    주의사항:
+    - 대량 주문 사용자 (1만 건 이상): 페이징 필수
+    - 정렬 순서: 최신 주문 먼저 (DESC)
+    - INNER JOIN 사용 → 사용자 삭제 시 주문도 조회 안 됨
+      (Soft Delete라면 WHERE u.deleted_at IS NULL 조건 추가)
+
+    실무 팁:
+    - 마이페이지에서는 최근 10개만 표시 (LIMIT 10)
+    - "더 보기" 클릭 시 추가 로드 (무한 스크롤)
+    - 캐싱: 주문 목록은 자주 변경되지 않으므로 Redis 캐싱 가능
+
+    ==================================================================================
+  -->
+  <select id="GetByUserId" resultMap="OrderWithUserResult">
+    SELECT
+      o.id, o.order_no, o.user_id, o.total_amount, o.status,
+      o.order_date, o.shipped_date, o.created_at, o.updated_at,
+      u.user_name, u.email AS user_email, u.full_name AS user_full_name
+    FROM orders o
+    INNER JOIN users u ON o.user_id = u.id
+    WHERE o.user_id = #{UserId}              -- FK 검색 (인덱스 필수!)
+    ORDER BY o.created_at DESC               -- 최신 주문 먼저
+    -- LIMIT 10                              -- 페이징 (필요시 주석 해제)
+  </select>
+
+  <!--
+    ==================================================================================
+    GetByStatus: 특정 상태의 모든 주문 조회 (관리자용)
+    ==================================================================================
+
+    사용 목적:
+    - 관리자 대시보드 "미처리 주문" 목록
+    - 배송 대기 주문 조회 (status = 'paid')
+    - 취소 주문 조회 (status = 'cancelled')
+    - 상태별 주문 통계
+
+    주문 상태 값 (status):
+    - 'pending': 주문 생성 (결제 대기)
+    - 'paid': 결제 완료 (배송 대기)
+    - 'shipped': 배송 중
+    - 'delivered': 배송 완료
+    - 'cancelled': 주문 취소
+    - 'refunded': 환불 완료
+
+    SQL 구조:
+    - WHERE o.status = #{Status}: 상태로 필터링
+    - ORDER BY o.created_at DESC: 최신 주문 먼저
+    - INNER JOIN users: 사용자 정보 포함
+
+    **인덱스 필수:**
+        CREATE INDEX idx_orders_status_created_at
+        ON orders(status, created_at DESC);
+
+    이유:
+    - 특정 상태의 주문이 수천~수만 건일 수 있음
+    - 인덱스 없으면 Full Table Scan
+
+    성능:
+    - 쿼리 시간: <20ms (인덱스 사용 시)
+    - 반환 건수: 상태에 따라 다름
+      - 'pending': 적음 (수백 건)
+      - 'delivered': 많음 (수만 건)
+    - 페이징 필수: 1,000건 이상이면 LIMIT/OFFSET
+
+    C# 사용 예제 (관리자 대시보드):
+        // 결제 완료, 배송 대기 주문
+        var paidOrders = await _orderMapper.GetByStatus("paid");
+        Console.WriteLine($"배송 대기: {paidOrders.Count}건");
+
+        // 취소 주문
+        var cancelledOrders = await _orderMapper.GetByStatus("cancelled");
+        Console.WriteLine($"취소 주문: {cancelledOrders.Count}건");
+
+    페이징 예제:
+        <select id="GetByStatusPaged" resultMap="OrderWithUserResult">
+          SELECT ...
+          WHERE o.status = #{Status}
+          ORDER BY o.created_at DESC
+          LIMIT #{PageSize} OFFSET #{Offset}
+        </select>
+
+    반환 값:
+    - 성공: List<Order> (비어있을 수 있음)
+    - 해당 상태 주문 없으면: 빈 리스트
+    - 잘못된 상태 값: 빈 리스트 (에러 아님)
+
+    주의사항:
+    - status 값은 고정된 문자열 (ENUM 권장)
+    - 대소문자 구분: 'pending' vs 'PENDING'
+      → DB 컬럼을 VARCHAR COLLATE utf8mb4_bin으로 설정하거나
+      → WHERE LOWER(o.status) = LOWER(#{Status}) 사용
+    - 대량 데이터: 페이징 필수 (10,000건 이상)
+
+    실무 팁:
+    - 관리자 대시보드에서 실시간 카운트:
+        SELECT status, COUNT(*) FROM orders GROUP BY status;
+    - 배치 작업: 'pending' 상태가 24시간 지나면 자동 취소
+    - 알림: 'paid' 상태가 새로 생기면 배송팀에 알림
+
+    동적 SQL로 다중 상태 조회:
+        <select id="GetByStatuses" resultMap="OrderWithUserResult">
+          SELECT ...
+          WHERE o.status IN
+          <foreach collection="Statuses" item="status" open="(" separator="," close=")">
+            #{status}
+          </foreach>
+          ORDER BY o.created_at DESC
+        </select>
+
+        C#:
+        var orders = await _orderMapper.GetByStatuses(new[] { "paid", "shipped" });
+
+    ==================================================================================
+  -->
+  <select id="GetByStatus" resultMap="OrderWithUserResult">
+    SELECT
+      o.id, o.order_no, o.user_id, o.total_amount, o.status,
+      o.order_date, o.shipped_date, o.created_at, o.updated_at,
+      u.user_name, u.email AS user_email, u.full_name AS user_full_name
+    FROM orders o
+    INNER JOIN users u ON o.user_id = u.id
+    WHERE o.status = #{Status}               -- 상태 필터링 (인덱스 필수!)
+    ORDER BY o.created_at DESC               -- 최신 주문 먼저
+    -- LIMIT 100                             -- 페이징 (필요시 주석 해제)
+  </select>
+
+  <!--
+    ==================================================================================
+    Insert: 새 주문 생성
+    ==================================================================================
+
+    사용 목적:
+    - 주문 생성 (첫 단계)
+    - 주문상세(InsertItem)와 함께 트랜잭션으로 실행
+
+    파라미터:
+    - OrderNo: 주문번호 (예: ORD-20260301-0001, 자동 생성 권장)
+    - UserId: 주문한 사용자 ID (FK, NOT NULL)
+    - TotalAmount: 총 금액 (초기값 0, 나중에 업데이트)
+    - Status: 주문 상태 (기본값: 'pending')
+    - OrderDate: 주문 일시 (DateTime.UtcNow)
+    - CreatedAt: 생성 일시 (DateTime.UtcNow)
+
+    **트랜잭션 필수:**
+    1. orders 테이블에 INSERT
+    2. order_items 테이블에 여러 건 INSERT
+    3. products 테이블에서 재고 차감 (UPDATE)
+    → 하나라도 실패하면 전체 ROLLBACK
+
+    C# 트랜잭션 예제:
+        using var transaction = _connection.BeginTransaction();
+        try
+        {
+            // 1. 주문 생성
+            var order = new Order
+            {
+                OrderNo = GenerateOrderNo(),  // "ORD-20260301-0001"
+                UserId = userId,
+                TotalAmount = 0,              // 나중에 업데이트
+                Status = "pending",
+                OrderDate = DateTime.UtcNow,
+                CreatedAt = DateTime.UtcNow
+            };
+            await _orderMapper.Insert(order);
+            int orderId = order.Id;  // Auto-increment ID 획득
+
+            // 2. 주문상세 생성 + 재고 차감
+            decimal totalAmount = 0;
+            foreach (var item in cartItems)
+            {
+                var product = await _productMapper.GetById(item.ProductId);
+                if (product == null || product.StockQty < item.Quantity)
+                    throw new Exception("재고 부족");
+
+                var orderItem = new OrderItem
+                {
+                    OrderId = orderId,
+                    ProductId = item.ProductId,
+                    Quantity = item.Quantity,
+                    UnitPrice = product.Price,
+                    Subtotal = product.Price * item.Quantity
+                };
+                await _orderMapper.InsertItem(orderItem);
+                await _productMapper.UpdateStock(item.ProductId, -item.Quantity);
+
+                totalAmount += orderItem.Subtotal;
+            }
+
+            // 3. 총 금액 업데이트 (선택)
+            order.TotalAmount = totalAmount;
+            await _orderMapper.Update(order);
+
+            transaction.Commit();
+        }
+        catch
+        {
+            transaction.Rollback();
+            throw;
+        }
+
+    **주문번호 생성 전략:**
+    1. 날짜 기반: ORD-20260301-0001
+    2. UUID: ORD-a1b2c3d4-e5f6
+    3. Snowflake ID: 1234567890123456789
+
+    추천: 날짜 기반 + 일련번호
+        private string GenerateOrderNo()
+        {
+            var date = DateTime.UtcNow.ToString("yyyyMMdd");
+            var seq = _orderMapper.GetTodayCount() + 1;
+            return $"ORD-{date}-{seq:D4}";
+        }
+
+    주의사항:
+    - Id는 Auto-increment (PostgreSQL: SERIAL, MySQL: AUTO_INCREMENT)
+    - INSERT 후 생성된 ID는 order.Id에 자동 할당됨 (NuVatis 기능)
+    - TotalAmount는 초기값 0, 나중에 계산 후 업데이트
+    - 외래키 제약: UserId는 users 테이블에 존재해야 함
+
+    실무 팁:
+    - OrderNo는 UNIQUE 제약 조건 추가
+    - 트랜잭션 격리 수준: READ COMMITTED (기본값)
+    - 동시 주문: 주문번호 중복 방지 (DB Lock 또는 Redis)
+
+    ==================================================================================
+  -->
+  <insert id="Insert">
+    INSERT INTO orders (order_no, user_id, total_amount, status, order_date, created_at)
+    VALUES (
+      #{OrderNo},      -- 주문번호 (UNIQUE)
+      #{UserId},       -- FK (users.id)
+      #{TotalAmount},  -- 총 금액 (초기값 0)
+      #{Status},       -- 주문 상태 (기본값: 'pending')
+      #{OrderDate},    -- 주문 일시
+      #{CreatedAt}     -- 생성 일시
+    )
+    -- RETURNING id;  -- PostgreSQL: 생성된 ID 반환 (NuVatis 자동 처리)
+  </insert>
+
+  <!--
+    ==================================================================================
+    InsertItem: 주문상세 생성
+    ==================================================================================
+
+    사용 목적:
+    - 주문의 개별 상품 정보 저장
+    - Insert와 함께 트랜잭션으로 실행
+    - 장바구니 → 주문 변환 시 사용
+
+    파라미터:
+    - OrderId: 주문 ID (FK, orders.id)
+    - ProductId: 상품 ID (FK, products.id)
+    - Quantity: 주문 수량 (양수)
+    - UnitPrice: 주문 당시 단가 (products.price 스냅샷)
+    - Subtotal: 소계 (UnitPrice * Quantity)
+
+    **왜 UnitPrice를 저장?**
+    - products.price는 변동 가능 (할인, 가격 인상)
+    - 주문 당시의 가격을 기록해야 함
+    - UnitPrice = 주문 당시의 products.price
+
+    **Subtotal 계산:**
+    - C#에서 계산: item.Subtotal = product.Price * item.Quantity
+    - DB에서 계산 (선택):
+        INSERT INTO order_items (order_id, product_id, quantity, unit_price, subtotal)
+        VALUES (#{OrderId}, #{ProductId}, #{Quantity}, #{UnitPrice}, #{UnitPrice} * #{Quantity})
+
+    **외래키 제약 조건:**
+    - order_id → orders.id (CASCADE ON DELETE)
+    - product_id → products.id (RESTRICT ON DELETE)
+
+    CASCADE ON DELETE:
+    - 주문 삭제 시 주문상세도 자동 삭제
+
+    RESTRICT ON DELETE:
+    - 상품 삭제 시 주문상세가 있으면 삭제 불가
+    - 이유: 주문 이력 보존
+
+    C# 사용 예제:
+        foreach (var cartItem in cart.Items)
+        {
+            var product = await _productMapper.GetById(cartItem.ProductId);
+
+            var orderItem = new OrderItem
+            {
+                OrderId = order.Id,
+                ProductId = product.Id,
+                Quantity = cartItem.Quantity,
+                UnitPrice = product.Price,  // 현재 가격
+                Subtotal = product.Price * cartItem.Quantity
+            };
+
+            await _orderMapper.InsertItem(orderItem);
+        }
+
+    주의사항:
+    - OrderId는 Insert 후 생성된 ID 사용
+    - Quantity는 양수 제약 (CHECK (quantity > 0))
+    - UnitPrice는 음수 불가 (CHECK (unit_price >= 0))
+    - 재고 차감은 별도 처리 (ProductMapper.UpdateStock)
+
+    실무 팁:
+    - 일괄 INSERT 권장 (성능):
+        INSERT INTO order_items VALUES
+        (1, 10, 2, 1000, 2000),
+        (1, 11, 1, 500, 500),
+        (1, 12, 3, 300, 900);
+    - NuVatis에서는 foreach로 개별 INSERT
+      → ExecuteAsync로 일괄 INSERT 구현 가능
+
+    ==================================================================================
+  -->
+  <insert id="InsertItem">
+    INSERT INTO order_items (order_id, product_id, quantity, unit_price, subtotal)
+    VALUES (
+      #{OrderId},      -- FK (orders.id)
+      #{ProductId},    -- FK (products.id)
+      #{Quantity},     -- 주문 수량 (양수)
+      #{UnitPrice},    -- 주문 당시 단가 (스냅샷)
+      #{Subtotal}      -- 소계 (UnitPrice * Quantity)
+    )
+  </insert>
+
+  <!--
+    ==================================================================================
+    UpdateStatus: 주문 상태 변경
+    ==================================================================================
+
+    사용 목적:
+    - 주문 진행 상태 업데이트
+    - 워크플로우: pending → paid → shipped → delivered
+    - 또는 취소: pending → cancelled
+
+    파라미터:
+    - Id: 주문 ID (PK)
+    - Status: 새 상태 값
+
+    상태 전환 규칙 (FSM: Finite State Machine):
+    1. pending → paid (결제 완료)
+    2. paid → shipped (배송 시작)
+    3. shipped → delivered (배송 완료)
+    4. * → cancelled (취소 - 단, delivered 제외)
+    5. cancelled → refunded (환불 완료)
+
+    잘못된 전환:
+    - delivered → cancelled (배송 완료 후 취소 불가)
+    - shipped → pending (역방향 불가)
+
+    C# 상태 검증 예제:
+        private readonly Dictionary<string, string[]> _allowedTransitions = new()
+        {
+            ["pending"] = new[] { "paid", "cancelled" },
+            ["paid"] = new[] { "shipped", "cancelled" },
+            ["shipped"] = new[] { "delivered" },
+            ["delivered"] = Array.Empty<string>(),  // 종료 상태
+            ["cancelled"] = new[] { "refunded" }
+        };
+
+        public async Task UpdateStatus(int orderId, string newStatus)
+        {
+            var order = await _orderMapper.GetById(orderId);
+            if (order == null)
+                throw new NotFoundException("주문을 찾을 수 없습니다");
+
+            if (!_allowedTransitions[order.Status].Contains(newStatus))
+                throw new InvalidOperationException(
+                    $"상태 전환 불가: {order.Status} → {newStatus}");
+
+            await _orderMapper.UpdateStatus(orderId, newStatus);
+        }
+
+    **CURRENT_TIMESTAMP vs #{UpdatedAt}:**
+    - CURRENT_TIMESTAMP: DB 서버 시간 (권장)
+    - #{UpdatedAt}: 애플리케이션 서버 시간
+    - 이유: DB 시간이 신뢰할 수 있는 단일 출처
+
+    성능:
+    - 쿼리 시간: <5ms (PK 검색)
+    - 영향받는 행: 1개 (WHERE id = #{Id})
+    - 트랜잭션: 필요 없음 (단일 UPDATE)
+
+    주의사항:
+    - 상태 변경 이력 기록 권장 (order_status_history 테이블)
+    - 동시 업데이트 방지: 낙관적 잠금 (version 컬럼)
+    - 상태별 후속 작업:
+      - paid → 재고 차감 (트랜잭션)
+      - shipped → 배송 추적 시작
+      - delivered → 포인트 적립
+
+    실무 팁:
+    - 상태 변경 시 이벤트 발행 (메시지 큐):
+        await _eventPublisher.Publish(new OrderStatusChanged(orderId, newStatus));
+    - 상태별 알림:
+        - paid → 주문 확인 이메일
+        - shipped → 배송 시작 SMS
+        - delivered → 리뷰 요청
+
+    ==================================================================================
+  -->
+  <update id="UpdateStatus">
+    UPDATE orders
+    SET status     = #{Status},             -- 새 상태 값
+        updated_at = CURRENT_TIMESTAMP      -- DB 서버 시간 (자동)
+    WHERE id = #{Id}                        -- PK 검색 (빠름)
+  </update>
+
+  <!--
+    ==================================================================================
+    Delete: 주문 삭제 (Hard Delete)
+    ==================================================================================
+
+    사용 목적:
+    - 테스트 데이터 삭제
+    - 관리자가 잘못 생성된 주문 삭제
+    - 주의: 실무에서는 Soft Delete 권장
+
+    **Hard Delete vs Soft Delete:**
+
+    Hard Delete (이 방식):
+    - DB에서 완전히 삭제
+    - 복구 불가능
+    - 장점: 디스크 절약
+    - 단점: 감사 로그 없음
+
+    Soft Delete (권장):
+    - deleted_at 컬럼에 삭제 일시 기록
+    - 복구 가능
+    - 장점: 감사 추적, 복구 가능
+    - 단점: 디스크 사용량 증가
+
+    Soft Delete 구현:
+        <update id="SoftDelete">
+          UPDATE orders
+          SET deleted_at = CURRENT_TIMESTAMP
+          WHERE id = #{Id} AND deleted_at IS NULL
+        </update>
+
+        모든 쿼리에 조건 추가:
+        WHERE o.deleted_at IS NULL
+
+    **외래키 제약 조건:**
+    - order_items.order_id → orders.id (CASCADE)
+      → 주문 삭제 시 주문상세도 자동 삭제
+
+    하지만 이 예제에서는 수동 삭제:
+        1. DeleteItems(orderId);  // 먼저 주문상세 삭제
+        2. Delete(orderId);       // 그 다음 주문 삭제
+
+    이유:
+    - 명시적 제어 (의도치 않은 삭제 방지)
+    - 삭제 이력 기록 가능
+    - CASCADE 설정 여부 독립적
+
+    C# 사용 예제:
+        using var transaction = _connection.BeginTransaction();
+        try
+        {
+            // 1. 주문상세 삭제
+            await _orderMapper.DeleteItems(orderId);
+
+            // 2. 주문 삭제
+            await _orderMapper.Delete(orderId);
+
+            // 3. 재고 복원 (선택)
+            foreach (var item in orderItems)
+            {
+                await _productMapper.UpdateStock(item.ProductId, item.Quantity);
+            }
+
+            transaction.Commit();
+        }
+        catch
+        {
+            transaction.Rollback();
+            throw;
+        }
+
+    주의사항:
+    - 실무에서는 Soft Delete 강력 권장
+    - Hard Delete는 개발/테스트 환경에서만
+    - 삭제 전 상태 확인:
+        - pending, cancelled 상태만 삭제 허용
+        - paid, shipped, delivered는 삭제 금지
+    - 감사 로그 기록 (누가, 언제, 왜 삭제했는지)
+
+    실무 팁:
+    - 삭제 가능 조건:
+        WHERE id = #{Id} AND status IN ('pending', 'cancelled')
+    - 삭제 권한: 관리자만 (RBAC)
+    - 삭제 전 확인:
+        if (order.Status != "pending" && order.Status != "cancelled")
+            throw new InvalidOperationException("삭제 불가능한 상태입니다");
+
+    ==================================================================================
+  -->
+  <delete id="Delete">
+    DELETE FROM orders
+    WHERE id = #{Id}                        -- PK 검색
+    -- AND status IN ('pending', 'cancelled')  -- 안전장치 (필요시 주석 해제)
+  </delete>
+
+  <!--
+    ==================================================================================
+    DeleteItems: 주문상세 전체 삭제
+    ==================================================================================
+
+    사용 목적:
+    - 주문 삭제 전 주문상세 먼저 삭제 (외래키 제약)
+    - 주문 취소 시 주문상세 정리
+    - 주문 내용 전체 리셋 (재작성)
+
+    파라미터:
+    - OrderId: 주문 ID (FK, orders.id)
+
+    SQL 구조:
+    - WHERE order_id = #{OrderId}: FK로 검색
+    - 해당 주문의 모든 주문상세 삭제
+
+    **외래키 제약 조건:**
+    - order_items.order_id → orders.id
+    - CASCADE ON DELETE 설정 시:
+      → 주문 삭제 시 주문상세도 자동 삭제
+      → 이 쿼리 불필요
+
+    하지만 수동 삭제 권장:
+    - 명시적 제어
+    - 재고 복원 로직 추가 가능
+    - 삭제 이력 기록
+
+    C# 사용 예제 (재고 복원 포함):
+        // 1. 주문상세 조회 (재고 복원용)
+        var order = await _orderMapper.GetByIdWithItems(orderId);
+
+        // 2. 주문상세 삭제
+        await _orderMapper.DeleteItems(orderId);
+
+        // 3. 재고 복원
+        foreach (var item in order.Items)
+        {
+            await _productMapper.UpdateStock(item.ProductId, item.Quantity);
+        }
+
+        // 4. 주문 삭제 (선택)
+        await _orderMapper.Delete(orderId);
+
+    성능:
+    - 쿼리 시간: <10ms (인덱스 사용 시)
+    - 영향받는 행: 주문상세 개수 (평균 1-10개)
+    - 인덱스: order_items.order_id (FK 인덱스 자동 생성)
+
+    주의사항:
+    - 삭제 전 재고 복원 고려
+    - 트랜잭션 사용 (일관성 보장)
+    - Soft Delete 고려:
+        <update id="SoftDeleteItems">
+          UPDATE order_items
+          SET deleted_at = CURRENT_TIMESTAMP
+          WHERE order_id = #{OrderId} AND deleted_at IS NULL
+        </update>
+
+    실무 팁:
+    - 주문 취소 시:
+        1. 주문 상태 → 'cancelled'
+        2. 주문상세 삭제 (또는 Soft Delete)
+        3. 재고 복원
+        4. 결제 취소 (PG사 API)
+    - 주문 수정 시:
+        1. 기존 주문상세 삭제
+        2. 새 주문상세 생성
+        3. 재고 재계산
+
+    ==================================================================================
+  -->
+  <delete id="DeleteItems">
+    DELETE FROM order_items
+    WHERE order_id = #{OrderId}             -- FK 검색 (해당 주문의 모든 주문상세)
+  </delete>
+
+</mapper>

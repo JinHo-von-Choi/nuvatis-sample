@@ -1,0 +1,6 @@
+@NuVatis.Sample.WebApi_HostAddress = http://localhost:5199
+
+GET {{NuVatis.Sample.WebApi_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###

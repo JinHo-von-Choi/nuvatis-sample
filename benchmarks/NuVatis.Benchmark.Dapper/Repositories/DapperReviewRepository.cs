@@ -1,0 +1,116 @@
+using Dapper;
+using Npgsql;
+using NuVatis.Benchmark.Core.Interfaces;
+using NuVatis.Benchmark.Core.Models;
+
+namespace NuVatis.Benchmark.Dapper.Repositories;
+
+public class DapperReviewRepository : IReviewRepository
+{
+    private readonly string _connectionString;
+
+    public DapperReviewRepository(string connectionString)
+    {
+        _connectionString = connectionString;
+    }
+
+    public async Task<Review?> GetByIdAsync(long id)
+    {
+        await using var conn = new NpgsqlConnection(_connectionString);
+        return await conn.QuerySingleOrDefaultAsync<Review>(
+            "SELECT * FROM reviews WHERE id = @Id", new { Id = id });
+    }
+
+    public async Task<IEnumerable<Review>> GetByProductIdAsync(long productId)
+    {
+        await using var conn = new NpgsqlConnection(_connectionString);
+        return await conn.QueryAsync<Review>(
+            "SELECT * FROM reviews WHERE product_id = @ProductId ORDER BY created_at DESC LIMIT 100",
+            new { ProductId = productId });
+    }
+
+    public async Task<IEnumerable<Review>> GetWithDetailsAsync(long productId, int limit)
+    {
+        await using var conn = new NpgsqlConnection(_connectionString);
+        const string sql = @"
+            SELECT r.*
+            FROM reviews r
+            INNER JOIN users u ON r.user_id = u.id
+            INNER JOIN products p ON r.product_id = p.id
+            WHERE r.product_id = @ProductId
+            ORDER BY r.created_at DESC
+            LIMIT @Limit";
+
+        return await conn.QueryAsync<Review>(sql, new { ProductId = productId, Limit = limit });
+    }
+
+    public async Task<Dictionary<long, double>> GetAverageRatingByProductAsync()
+    {
+        await using var conn = new NpgsqlConnection(_connectionString);
+        const string sql = @"
+            SELECT product_id, AVG(rating::decimal) AS avg_rating
+            FROM reviews
+            GROUP BY product_id
+            HAVING COUNT(*) >= 5
+            ORDER BY avg_rating DESC";
+
+        var result = await conn.QueryAsync<(long productId, double avgRating)>(sql);
+        return result.ToDictionary(x => x.productId, x => x.avgRating);
+    }
+
+    public async Task<IEnumerable<dynamic>> GetTopReviewsByProductAsync(int topN)
+    {
+        await using var conn = new NpgsqlConnection(_connectionString);
+        const string sql = @"
+            WITH ranked_reviews AS (
+                SELECT
+                    id, product_id, user_id, rating, helpful_count,
+                    ROW_NUMBER() OVER (PARTITION BY product_id ORDER BY helpful_count DESC, created_at DESC) AS rank
+                FROM reviews
+                WHERE is_verified = true
+            )
+            SELECT product_id, user_id, rating, helpful_count, rank
+            FROM ranked_reviews
+            WHERE rank <= @TopN
+            ORDER BY product_id, rank";
+
+        return await conn.QueryAsync(sql, new { TopN = topN });
+    }
+
+    public async Task<long> InsertAsync(Review review)
+    {
+        await using var conn = new NpgsqlConnection(_connectionString);
+        const string sql = @"
+            INSERT INTO reviews (user_id, product_id, rating, title, content, is_verified, helpful_count, created_at, updated_at)
+            VALUES (@UserId, @ProductId, @Rating, @Title, @Content, @IsVerified, @HelpfulCount, @CreatedAt, @UpdatedAt)
+            RETURNING id";
+
+        return await conn.ExecuteScalarAsync<long>(sql, review);
+    }
+
+    public async Task<int> BulkInsertAsync(IEnumerable<Review> reviews)
+    {
+        await using var conn = new NpgsqlConnection(_connectionString);
+        await conn.OpenAsync();
+
+        await using var writer = conn.BeginBinaryImport(
+            "COPY reviews (user_id, product_id, rating, title, content, is_verified, helpful_count, created_at, updated_at) FROM STDIN BINARY");
+
+        foreach (var review in reviews)
+        {
+            await writer.StartRowAsync();
+            await writer.WriteAsync(review.UserId);
+            await writer.WriteAsync(review.ProductId);
+            await writer.WriteAsync(review.Rating);
+            await writer.WriteAsync(review.Title);
+            await writer.WriteAsync(review.Content);
+            await writer.WriteAsync(review.IsVerified);
+            await writer.WriteAsync(review.HelpfulCount);
+            await writer.WriteAsync(review.CreatedAt, NpgsqlTypes.NpgsqlDbType.Timestamp);
+            await writer.WriteAsync(review.UpdatedAt, NpgsqlTypes.NpgsqlDbType.Timestamp);
+        }
+
+        var rows = await writer.CompleteAsync();
+        return (int)rows;
+    }
+}

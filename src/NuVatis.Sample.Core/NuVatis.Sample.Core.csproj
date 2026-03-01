@@ -1,0 +1,26 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="NuVatis.Core" Version="2.1.0" />
+    <PackageReference Include="NuVatis.Extensions.DependencyInjection" Version="2.1.0" />
+    <PackageReference Include="NuVatis.Generators" Version="2.1.0">
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+      <PrivateAssets>all</PrivateAssets>
+    </PackageReference>
+    <PackageReference Include="NuVatis.PostgreSql" Version="2.1.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- NuVatis XML 매퍼 파일을 AdditionalFiles로 추가하고 출력 디렉토리로 복사 -->
+    <AdditionalFiles Include="Mappers\Xml\*.xml">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </AdditionalFiles>
+  </ItemGroup>
+
+</Project>

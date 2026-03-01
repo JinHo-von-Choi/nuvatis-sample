@@ -1,0 +1,157 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<!--
+  주문 매퍼 XML (벤치마크용)
+  작성자: 최진호
+  작성일: 2026-03-01
+-->
+<mapper namespace="NuVatis.Benchmark.NuVatis.Mappers.IOrderMapper">
+
+  <!-- ResultMap 정의 -->
+  <resultMap id="OrderResult" type="NuVatis.Benchmark.Core.Models.Order">
+    <id column="id" property="Id" />
+    <result column="user_id" property="UserId" />
+    <result column="order_number" property="OrderNumber" />
+    <result column="order_status" property="OrderStatus" />
+    <result column="subtotal" property="Subtotal" />
+    <result column="discount_amount" property="DiscountAmount" />
+    <result column="tax_amount" property="TaxAmount" />
+    <result column="shipping_fee" property="ShippingFee" />
+    <result column="total_amount" property="TotalAmount" />
+    <result column="coupon_id" property="CouponId" />
+    <result column="created_at" property="CreatedAt" />
+    <result column="updated_at" property="UpdatedAt" />
+  </resultMap>
+
+  <!-- Simple: GetById -->
+  <select id="GetByIdAsync" resultMap="OrderResult">
+    SELECT id, user_id, order_number, order_status, subtotal, discount_amount, tax_amount, shipping_fee, total_amount, coupon_id, created_at, updated_at
+    FROM orders
+    WHERE id = #{id}
+  </select>
+
+  <!-- Simple: WhereClause (사용자별 주문) -->
+  <select id="GetByUserIdAsync" resultMap="OrderResult">
+    SELECT id, user_id, order_number, order_status, subtotal, discount_amount, tax_amount, shipping_fee, total_amount, coupon_id, created_at, updated_at
+    FROM orders
+    WHERE user_id = #{userId}
+    ORDER BY created_at DESC
+    LIMIT 100
+  </select>
+
+  <!-- Simple: SimplePaging -->
+  <select id="GetPagedAsync" resultMap="OrderResult">
+    SELECT id, user_id, order_number, order_status, subtotal, discount_amount, tax_amount, shipping_fee, total_amount, coupon_id, created_at, updated_at
+    FROM orders
+    ORDER BY created_at DESC
+    LIMIT #{limit} OFFSET #{offset}
+  </select>
+
+  <!-- Medium: TwoThreeJoin (Order + User + OrderItems) -->
+  <select id="GetWithUserAndItemsAsync" resultType="NuVatis.Benchmark.Core.Models.Order">
+    SELECT
+        o.id, o.user_id, o.order_number, o.order_status, o.subtotal, o.discount_amount, o.tax_amount, o.shipping_fee, o.total_amount, o.coupon_id, o.created_at, o.updated_at
+    FROM orders o
+    INNER JOIN users u ON o.user_id = u.id
+    LEFT JOIN order_items oi ON o.id = oi.order_id
+    WHERE o.id = #{id}
+  </select>
+
+  <!-- Complex: FivePlusJoin (Order + User + OrderItems + Product + Payment + Shipment) -->
+  <select id="GetCompleteOrderAsync" resultType="NuVatis.Benchmark.Core.Models.Order">
+    SELECT DISTINCT
+        o.id, o.user_id, o.order_number, o.order_status, o.subtotal, o.discount_amount, o.tax_amount, o.shipping_fee, o.total_amount, o.coupon_id, o.created_at, o.updated_at
+    FROM orders o
+    INNER JOIN users u ON o.user_id = u.id
+    LEFT JOIN order_items oi ON o.id = oi.order_id
+    LEFT JOIN products p ON oi.product_id = p.id
+    LEFT JOIN payments pay ON o.id = pay.order_id
+    LEFT JOIN shipments s ON o.id = s.order_id
+    WHERE o.id = #{id}
+  </select>
+
+  <!-- Complex: NPlusOneProblem (잘못된 방식 - N+1 시뮬레이션) -->
+  <select id="GetOrdersWithNPlusOneProblemAsync" resultMap="OrderResult">
+    SELECT id, user_id, order_number, order_status, subtotal, discount_amount, tax_amount, shipping_fee, total_amount, coupon_id, created_at, updated_at
+    FROM orders
+    WHERE user_id = #{userId}
+    ORDER BY created_at DESC
+    LIMIT #{limit}
+  </select>
+
+  <!-- Complex: NPlusOneProblem (올바른 방식 - Eager Loading) -->
+  <select id="GetOrdersOptimizedAsync" resultType="NuVatis.Benchmark.Core.Models.Order">
+    SELECT DISTINCT
+        o.id, o.user_id, o.order_number, o.order_status, o.subtotal, o.discount_amount, o.tax_amount, o.shipping_fee, o.total_amount, o.coupon_id, o.created_at, o.updated_at
+    FROM orders o
+    LEFT JOIN order_items oi ON o.id = oi.order_id
+    WHERE o.user_id = #{userId}
+    ORDER BY o.created_at DESC
+    LIMIT #{limit}
+  </select>
+
+  <!-- Complex: KeysetPaging (Keyset 기반 페이징) -->
+  <select id="GetKeysetPagedAsync" resultMap="OrderResult">
+    SELECT id, user_id, order_number, order_status, subtotal, discount_amount, tax_amount, shipping_fee, total_amount, coupon_id, created_at, updated_at
+    FROM orders
+    <where>
+      <if test="lastId != null">
+        AND id &lt; #{lastId}
+      </if>
+    </where>
+    ORDER BY id DESC
+    LIMIT #{limit}
+  </select>
+
+  <!-- Medium: GroupByAggregate (상태별 총액) -->
+  <select id="GetTotalAmountByStatusAsync" resultType="System.Collections.Generic.Dictionary`2[[System.String, System.Private.CoreLib],[System.Decimal, System.Private.CoreLib]]">
+    SELECT order_status AS Key, SUM(total_amount) AS Value
+    FROM orders
+    GROUP BY order_status
+    ORDER BY Value DESC
+  </select>
+
+  <!-- Medium: DynamicSearch (동적 검색) -->
+  <select id="SearchAsync" resultMap="OrderResult">
+    SELECT id, user_id, order_number, order_status, subtotal, discount_amount, tax_amount, shipping_fee, total_amount, coupon_id, created_at, updated_at
+    FROM orders
+    <where>
+      <if test="userId != null">
+        AND user_id = #{userId}
+      </if>
+      <if test="status != null">
+        AND order_status = #{status}
+      </if>
+      <if test="fromDate != null">
+        AND created_at &gt;= #{fromDate}
+      </if>
+      <if test="toDate != null">
+        AND created_at &lt;= #{toDate}
+      </if>
+    </where>
+    ORDER BY created_at DESC
+    LIMIT 1000
+  </select>
+
+  <!-- Simple: InsertSingle -->
+  <insert id="InsertAsync">
+    INSERT INTO orders (user_id, order_number, order_status, subtotal, discount_amount, tax_amount, shipping_fee, total_amount, coupon_id, created_at, updated_at)
+    VALUES (#{UserId}, #{OrderNumber}, #{OrderStatus}, #{Subtotal}, #{DiscountAmount}, #{TaxAmount}, #{ShippingFee}, #{TotalAmount}, #{CouponId}, #{CreatedAt}, #{UpdatedAt})
+    RETURNING id
+  </insert>
+
+  <!-- Stress: ComplexAggregation (일별 매출 집계) -->
+  <select id="GetDailySalesAggregationAsync" resultType="dynamic">
+    SELECT
+        DATE(created_at) AS sale_date,
+        COUNT(*) AS order_count,
+        SUM(total_amount) AS total_sales,
+        AVG(total_amount) AS avg_order_value,
+        MIN(total_amount) AS min_order,
+        MAX(total_amount) AS max_order
+    FROM orders
+    WHERE created_at BETWEEN #{fromDate} AND #{toDate}
+    GROUP BY DATE(created_at)
+    ORDER BY sale_date DESC
+  </select>
+
+</mapper>

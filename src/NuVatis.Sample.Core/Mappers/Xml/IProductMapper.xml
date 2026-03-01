@@ -1,0 +1,459 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<!--
+  ============================================
+  NuVatis 상품 매퍼 XML - 재고 관리 시스템 예제
+  ============================================
+
+  【 학습 목표 】
+  - 전자상거래 상품 CRUD 구현
+  - 재고 수량 원자적 업데이트 (동시성 처리)
+  - 카테고리 필터링 및 정렬
+  - Soft Delete 패턴 적용
+
+  【 실무 시나리오 】
+  - 상품 등록/수정/삭제 (관리자 기능)
+  - 카테고리별 상품 목록 (사용자 화면)
+  - 재고 차감/증가 (주문 처리)
+  - 품절 상품 자동 비활성화
+
+  작성자: 최진호
+  작성일: 2026-03-01
+-->
+<mapper namespace="NuVatis.Sample.Core.Mappers.IProductMapper">
+
+  <!--
+    ==========================================
+    ResultMap: 상품 엔티티 매핑
+    ==========================================
+
+    【 상품 테이블 구조 】
+    CREATE TABLE products (
+        id           SERIAL PRIMARY KEY,
+        product_code VARCHAR(50) UNIQUE NOT NULL,  → SKU (재고 관리 코드)
+        product_name VARCHAR(200) NOT NULL,
+        description  TEXT,
+        price        DECIMAL(10,2) NOT NULL,       → 금액 (소수점 2자리)
+        stock_qty    INTEGER DEFAULT 0,            → 재고 수량
+        category     VARCHAR(50),                  → 카테고리 (전자, 의류, 식품 등)
+        created_at   TIMESTAMP DEFAULT NOW(),
+        updated_at   TIMESTAMP,
+        is_active    BOOLEAN DEFAULT true          → Soft Delete 플래그
+    );
+
+    【 인덱스 전략 】
+    - PRIMARY KEY (id): 자동 생성, B-Tree 인덱스
+    - UNIQUE (product_code): SKU 중복 방지
+    - INDEX (category, is_active): 카테고리 검색 최적화
+    - INDEX (created_at): 최신 상품 정렬 최적화
+
+    【 비즈니스 규칙 】
+    - price: 0 이상 (음수 불가)
+    - stock_qty: 재고 부족 시 주문 차단
+    - product_code: 전역 고유 (예: ELEC-001, CLOT-002)
+  -->
+  <resultMap id="ProductResult" type="NuVatis.Sample.Core.Models.Product">
+    <id column="id" property="Id" />
+    <result column="product_code" property="ProductCode" />
+    <result column="product_name" property="ProductName" />
+    <result column="description" property="Description" />
+    <result column="price" property="Price" />
+    <result column="stock_qty" property="StockQty" />
+    <result column="category" property="Category" />
+    <result column="created_at" property="CreatedAt" />
+    <result column="updated_at" property="UpdatedAt" />
+    <result column="is_active" property="IsActive" />
+  </resultMap>
+
+  <!--
+    ==========================================
+    쿼리 1: ID로 상품 조회
+    ==========================================
+
+    【 사용 목적 】
+    - 상품 상세 페이지
+    - 재고 확인
+    - 가격 조회
+
+    【 성능 】
+    - Primary Key 조회: O(1) ~ O(log n)
+    - 응답 시간: <1ms (인덱스 Hit)
+
+    【 C# 사용 예시 】
+    var product = _productMapper.GetById(123);
+    if (product == null)
+    {
+        return NotFound("상품을 찾을 수 없습니다.");
+    }
+
+    Console.WriteLine($"상품명: {product.ProductName}");
+    Console.WriteLine($"가격: {product.Price:C}");
+    Console.WriteLine($"재고: {product.StockQty}개");
+  -->
+  <select id="GetById" resultMap="ProductResult">
+    SELECT id, product_code, product_name, description, price, stock_qty,
+           category, created_at, updated_at, is_active
+    FROM products
+    WHERE id = #{Id}
+  </select>
+
+  <!--
+    ==========================================
+    쿼리 2: 활성 상품 전체 조회
+    ==========================================
+
+    【 사용 목적 】
+    - 상품 목록 페이지
+    - 관리자 상품 관리 화면
+
+    【 필터링 】
+    - is_active = true: Soft Delete된 상품 제외
+    - 비활성 상품: 품절, 판매 중지, 관리자가 숨김 처리
+
+    【 정렬 】
+    - ORDER BY created_at DESC: 최신 상품 먼저 표시
+    - 대안: ORDER BY price ASC (저렴한 순)
+    - 대안: ORDER BY product_name (이름순)
+
+    【 페이징 권장 】
+    [비권장] 전체 조회:
+    SELECT * FROM products WHERE is_active = true
+    → 상품 10만 개면 메모리 부족
+
+    [권장] 페이징:
+    SELECT * FROM products WHERE is_active = true
+    ORDER BY created_at DESC
+    LIMIT 20 OFFSET 0  → 첫 20개만
+
+    【 C# 사용 예시 】
+    var products = _productMapper.GetAll();
+
+    // LINQ로 추가 필터링 가능
+    var electronics = products.Where(p => p.Category == "Electronics");
+    var expensive = products.Where(p => p.Price > 100000);
+  -->
+  <select id="GetAll" resultMap="ProductResult">
+    SELECT id, product_code, product_name, description, price, stock_qty,
+           category, created_at, updated_at, is_active
+    FROM products
+    WHERE is_active = true
+    ORDER BY created_at DESC
+  </select>
+
+  <!--
+    ==========================================
+    쿼리 3: 카테고리별 상품 조회
+    ==========================================
+
+    【 사용 목적 】
+    - 카테고리 페이지 (예: "전자제품" 카테고리)
+    - 네비게이션 메뉴 클릭 시
+
+    【 복합 조건 】
+    - category = #{Category}: 특정 카테고리만
+    - AND is_active = true: 활성 상품만
+
+    【 정렬 】
+    - ORDER BY product_name: 가나다순 정렬
+    - 사용자 친화적 (알파벳/한글 순서)
+
+    【 인덱스 활용 】
+    복합 인덱스 생성 권장:
+    CREATE INDEX idx_products_category_active
+    ON products(category, is_active);
+
+    → WHERE category = 'Electronics' AND is_active = true
+      인덱스 스캔만으로 조회 (빠름)
+
+    【 카테고리 표준화 】
+    [비권장] 자유 입력:
+    category = "전자제품", "전자", "Electronics" (혼재)
+
+    [권장] Enum 또는 코드 테이블:
+    category = "ELEC", "CLOT", "FOOD" (통일)
+
+    【 C# 사용 예시 】
+    // 전자제품 카테고리 조회
+    var products = _productMapper.GetByCategory("Electronics");
+
+    foreach (var product in products)
+    {
+        Console.WriteLine($"{product.ProductName} - {product.Price:C}");
+    }
+
+    // 카테고리 없으면 빈 리스트 반환 (null 아님)
+    if (!products.Any())
+    {
+        Console.WriteLine("해당 카테고리에 상품이 없습니다.");
+    }
+  -->
+  <select id="GetByCategory" resultMap="ProductResult">
+    SELECT id, product_code, product_name, description, price, stock_qty,
+           category, created_at, updated_at, is_active
+    FROM products
+    WHERE category = #{Category} AND is_active = true
+    ORDER BY product_name
+  </select>
+
+  <!--
+    ==========================================
+    쿼리 4: 상품 등록
+    ==========================================
+
+    【 사용 목적 】
+    - 새 상품 추가 (관리자 기능)
+    - 대량 상품 임포트
+
+    【 필수 필드 검증 】
+    C#에서 사전 검증 필요:
+    if (string.IsNullOrWhiteSpace(product.ProductCode))
+        throw new ArgumentException("상품 코드 필수");
+
+    if (product.Price < 0)
+        throw new ArgumentException("가격은 0 이상");
+
+    if (product.StockQty < 0)
+        throw new ArgumentException("재고는 0 이상");
+
+    【 중복 방지 】
+    product_code가 UNIQUE 제약 조건:
+    INSERT 시 중복되면 예외 발생
+    → C#에서 try-catch로 처리
+
+    try
+    {
+        _productMapper.Insert(product);
+    }
+    catch (PostgresException ex) when (ex.SqlState == "23505")
+    {
+        Console.WriteLine("이미 존재하는 상품 코드입니다.");
+    }
+
+    【 자동 생성 필드 】
+    - id: SERIAL (자동 증가)
+    - created_at: 현재 시각
+    - is_active: true (기본값)
+
+    【 C# 사용 예시 】
+    var product = new Product
+    {
+        ProductCode = "ELEC-001",
+        ProductName = "무선 이어폰",
+        Description = "블루투스 5.0 지원",
+        Price = 89000,
+        StockQty = 100,
+        Category = "Electronics",
+        CreatedAt = DateTime.UtcNow,
+        IsActive = true
+    };
+
+    int rowsAffected = _productMapper.Insert(product);
+    Console.WriteLine($"{rowsAffected}건 등록됨");
+  -->
+  <insert id="Insert">
+    INSERT INTO products (product_code, product_name, description, price,
+                         stock_qty, category, created_at, is_active)
+    VALUES (#{ProductCode}, #{ProductName}, #{Description}, #{Price},
+            #{StockQty}, #{Category}, #{CreatedAt}, #{IsActive})
+  </insert>
+
+  <!--
+    ==========================================
+    쿼리 5: 상품 정보 수정
+    ==========================================
+
+    【 사용 목적 】
+    - 상품 정보 업데이트 (이름, 설명, 가격)
+    - 재고 수량은 별도 메서드 사용 (UpdateStock)
+
+    【 수정 불가 필드 】
+    - id: Primary Key (변경 불가)
+    - product_code: SKU (변경하면 재고 추적 불가)
+    - created_at: 생성 시각 (변경 금지)
+
+    【 낙관적 잠금 (Optimistic Locking) 】
+    동시 수정 방지:
+
+    [문제 상황]
+    - 사용자 A: 상품 가격 10,000원 → 12,000원 수정
+    - 사용자 B: 동시에 가격 10,000원 → 11,000원 수정
+    - 결과: B의 수정으로 A의 수정 덮어씀 (Lost Update)
+
+    [해결 방법 1: 낙관적 잠금]
+    UPDATE products
+    SET price = #{Price}, version = version + 1
+    WHERE id = #{Id} AND version = #{OldVersion}
+
+    → version이 다르면 수정 실패 (누군가 먼저 수정함)
+
+    [해결 방법 2: updated_at 체크]
+    UPDATE products
+    SET price = #{Price}, updated_at = CURRENT_TIMESTAMP
+    WHERE id = #{Id} AND updated_at = #{OldUpdatedAt}
+
+    【 C# 사용 예시 】
+    var product = _productMapper.GetById(123);
+    product.Price = 12000;
+    product.UpdatedAt = DateTime.UtcNow;
+
+    int rowsAffected = _productMapper.Update(product);
+    if (rowsAffected == 0)
+    {
+        Console.WriteLine("수정 실패: 상품이 삭제되었거나 없습니다.");
+    }
+  -->
+  <update id="Update">
+    UPDATE products
+    SET product_name = #{ProductName},
+        description  = #{Description},
+        price        = #{Price},
+        stock_qty    = #{StockQty},
+        category     = #{Category},
+        updated_at   = #{UpdatedAt}
+    WHERE id = #{Id}
+  </update>
+
+  <!--
+    ==========================================
+    쿼리 6: 재고 수량 업데이트 (원자적 연산)
+    ==========================================
+
+    【 사용 목적 】
+    - 주문 시 재고 차감
+    - 반품 시 재고 증가
+    - 입고 처리
+
+    【 동시성 문제 】
+
+    [위험한 방법: Read-Modify-Write]
+    1. var product = GetById(123);       // 재고 100개 읽기
+    2. product.StockQty -= 10;           // 100 - 10 = 90
+    3. Update(product);                   // 90개로 업데이트
+
+    문제: 두 주문이 동시 발생 시
+    - 주문 A: 100 - 10 = 90 저장
+    - 주문 B: 100 - 5 = 95 저장 (동시에 100 읽음)
+    - 결과: 95개 (실제로는 85개여야 함) → 재고 부정확!
+
+    [안전한 방법: 원자적 업데이트]
+    UPDATE products
+    SET stock_qty = stock_qty + (차감량)
+    WHERE id = #{ProductId}
+
+    - SQL 한 줄로 Read-Modify-Write 원자적 실행
+    - 동시 주문도 정확히 처리됨
+
+    【 파라미터 】
+    - ProductId: 상품 ID
+    - Quantity: 변경량 (양수: 증가, 음수: 감소)
+
+    예시:
+    - 주문 10개: Quantity = -10
+    - 반품 5개: Quantity = +5
+    - 입고 100개: Quantity = +100
+
+    【 재고 부족 체크 】
+    C#에서 트랜잭션으로 처리:
+
+    using var transaction = connection.BeginTransaction();
+    try
+    {
+        // 1. 재고 확인
+        var product = GetById(productId);
+        if (product.StockQty < orderQty)
+            throw new Exception("재고 부족");
+
+        // 2. 재고 차감 (원자적)
+        UpdateStock(productId, -orderQty);
+
+        // 3. 주문 생성
+        CreateOrder(order);
+
+        transaction.Commit();
+    }
+    catch
+    {
+        transaction.Rollback();
+        throw;
+    }
+
+    【 C# 사용 예시 】
+    // 주문 시 재고 10개 차감
+    _productMapper.UpdateStock(productId: 123, quantity: -10);
+
+    // 반품 시 재고 5개 증가
+    _productMapper.UpdateStock(productId: 123, quantity: 5);
+
+    // 재고 확인
+    var product = _productMapper.GetById(123);
+    Console.WriteLine($"현재 재고: {product.StockQty}개");
+  -->
+  <update id="UpdateStock">
+    UPDATE products
+    SET stock_qty  = stock_qty + #{Quantity},
+        updated_at = CURRENT_TIMESTAMP
+    WHERE id = #{ProductId}
+  </update>
+
+  <!--
+    ==========================================
+    쿼리 7: 상품 삭제 (Hard Delete)
+    ==========================================
+
+    【 사용 목적 】
+    - 테스트 데이터 제거
+    - 잘못 등록된 상품 삭제
+
+    【 주의사항 】
+
+    [위험] Hard Delete 사용 시:
+    - 주문 내역에 상품 참조 있으면 삭제 실패 (외래키 제약)
+    - 판매 이력 분석 불가능
+    - 복구 불가능
+
+    [권장] Soft Delete 사용:
+    UPDATE products
+    SET is_active = false,
+        updated_at = CURRENT_TIMESTAMP
+    WHERE id = #{Id}
+
+    → 데이터는 남기고 비활성화만
+
+    【 외래키 제약 처리 】
+
+    [옵션 1: CASCADE]
+    ALTER TABLE order_items
+    ADD CONSTRAINT fk_product
+    FOREIGN KEY (product_id) REFERENCES products(id)
+    ON DELETE CASCADE;
+
+    → 상품 삭제 시 주문 내역도 자동 삭제 (위험!)
+
+    [옵션 2: RESTRICT (기본값)]
+    → 주문 내역 있으면 삭제 실패 (안전)
+
+    [옵션 3: SET NULL]
+    → 상품 삭제 시 order_items.product_id = NULL
+
+    【 실무 권장사항 】
+    - Hard Delete 금지
+    - Soft Delete 사용
+    - 주문 이력 보존
+    - 감사 로그 기록
+
+    【 C# 사용 예시 】
+    try
+    {
+        int rowsAffected = _productMapper.Delete(123);
+        Console.WriteLine("상품 삭제됨 (복구 불가능)");
+    }
+    catch (PostgresException ex) when (ex.SqlState == "23503")
+    {
+        Console.WriteLine("삭제 실패: 주문 내역이 존재합니다.");
+        Console.WriteLine("Soft Delete를 사용하세요.");
+    }
+  -->
+  <delete id="Delete">
+    DELETE FROM products WHERE id = #{Id}
+  </delete>
+
+</mapper>
