@@ -773,31 +773,6 @@ MIT License - 자세한 내용은 [LICENSE](LICENSE) 파일을 참조하세요.
 
 ---
 
-## 🎓 학습 가이드
-
-이 프로젝트의 **극도로 상세한 주석**을 순서대로 학습하세요:
-
-1. **Models** (데이터베이스 매핑 이해)
-   - `User.cs` - 기본 엔티티
-   - `Product.cs` - 재고 관리
-   - `Order.cs` - association/collection
-   - `OrderItem.cs` - 가격 스냅샷
-
-2. **XML 매퍼** (SQL 작성 방법)
-   - `IUserMapper.xml` - 동적 SQL, 페이징
-   - `IProductMapper.xml` - 원자적 업데이트
-   - `IOrderMapper.xml` - 복잡한 JOIN
-
-3. **Controllers** (실무 패턴)
-   - `UsersController.cs` - RESTful API
-   - `ProductsController.cs` - 동시성 제어
-   - `OrdersController.cs` - 트랜잭션
-
-4. **벤치마크** (성능 이해)
-   - `benchmarks/` 디렉토리 전체
-
----
-
 **⭐ 이 프로젝트가 도움이 되었다면 Star를 눌러주세요!**
 
 ---
