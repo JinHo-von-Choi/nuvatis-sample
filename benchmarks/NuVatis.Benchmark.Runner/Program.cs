@@ -4,7 +4,6 @@ using BenchmarkDotNet.Diagnosers;
 using BenchmarkDotNet.Exporters;
 using BenchmarkDotNet.Jobs;
 using BenchmarkDotNet.Running;
-using BenchmarkDotNet.Toolchains.InProcess.Emit;
 using NuVatis.Benchmark.Runner.Benchmarks;
 
 /**
@@ -26,8 +25,9 @@ var config = ManualConfig.Create(DefaultConfig.Instance)
     .AddColumn(RankColumn.Arabic)
     .AddExporter(MarkdownExporter.GitHub)
     .AddExporter(HtmlExporter.Default)
+    .AddExporter(BenchmarkDotNet.Exporters.Json.JsonExporter.Full)
     .AddJob(Job.Default
-        .WithToolchain(InProcessEmitToolchain.Instance)
+        // InProcessEmitToolchain 제거 - WDAC 충돌 방지 (OutOfProcess 기본 툴체인 사용)
         .WithWarmupCount(3)
         .WithIterationCount(10))
     .WithOptions(ConfigOptions.DisableOptimizationsValidator);
@@ -83,3 +83,56 @@ switch (choice)
 
 Console.WriteLine("\n✓ 벤치마크 완료!");
 Console.WriteLine("결과 파일: BenchmarkDotNet.Artifacts/results/");
+
+// 대시보드 자동 업데이트
+Console.WriteLine("\n📊 대시보드 업데이트 중...");
+UpdateDashboard();
+
+static void UpdateDashboard()
+{
+    try
+    {
+        var resultsDir = "BenchmarkDotNet.Artifacts/results";
+        var dashboardPublicDir = "D:/jobs/nu/nuvatis-sample/benchmarks/NuVatis.Benchmark.Dashboard/public";
+
+        if (!Directory.Exists(resultsDir))
+        {
+            Console.WriteLine($"⚠️ 결과 디렉토리를 찾을 수 없습니다: {resultsDir}");
+            return;
+        }
+
+        if (!Directory.Exists(dashboardPublicDir))
+        {
+            Console.WriteLine($"⚠️ 대시보드 public 디렉토리를 찾을 수 없습니다: {dashboardPublicDir}");
+            return;
+        }
+
+        var jsonFiles = Directory.GetFiles(resultsDir, "*-report-full.json");
+        var copiedCount = 0;
+
+        foreach (var sourceFile in jsonFiles)
+        {
+            var fileName = Path.GetFileName(sourceFile);
+            var destFile = Path.Combine(dashboardPublicDir, fileName);
+            File.Copy(sourceFile, destFile, overwrite: true);
+            copiedCount++;
+            Console.WriteLine($"  ✓ {fileName}");
+        }
+
+        if (copiedCount > 0)
+        {
+            Console.WriteLine($"\n✅ {copiedCount}개 파일 복사 완료!");
+            Console.WriteLine("\n대시보드 실행:");
+            Console.WriteLine("  cd D:/jobs/nu/nuvatis-sample/benchmarks/NuVatis.Benchmark.Dashboard");
+            Console.WriteLine("  npm run dev");
+        }
+        else
+        {
+            Console.WriteLine("⚠️ 복사할 JSON 파일이 없습니다.");
+        }
+    }
+    catch (Exception ex)
+    {
+        Console.WriteLine($"⚠️ 대시보드 업데이트 오류: {ex.Message}");
+    }
+}

@@ -3,33 +3,30 @@
   리뷰 매퍼 XML (벤치마크용)
   작성자: 최진호
   작성일: 2026-03-01
+  수정일: 2026-03-04 - DB 스키마 일치
 -->
-<mapper namespace="NuVatis.Benchmark.NuVatis.Mappers.IReviewMapper">
+<mapper namespace="BenchmarkNuVatis.Mappers.IReviewMapper">
 
-  <!-- ResultMap 정의 -->
+  <!-- ResultMap 정의 (실제 DB 스키마에 맞춤) -->
   <resultMap id="ReviewResult" type="NuVatis.Benchmark.Core.Models.Review">
     <id column="id" property="Id" />
     <result column="user_id" property="UserId" />
     <result column="product_id" property="ProductId" />
     <result column="rating" property="Rating" />
-    <result column="title" property="Title" />
-    <result column="content" property="Content" />
-    <result column="is_verified" property="IsVerified" />
-    <result column="helpful_count" property="HelpfulCount" />
+    <result column="comment" property="Content" />
     <result column="created_at" property="CreatedAt" />
-    <result column="updated_at" property="UpdatedAt" />
   </resultMap>
 
   <!-- Simple: GetById -->
   <select id="GetByIdAsync" resultMap="ReviewResult">
-    SELECT id, user_id, product_id, rating, title, content, is_verified, helpful_count, created_at, updated_at
+    SELECT id, user_id, product_id, rating, comment, created_at
     FROM reviews
     WHERE id = #{id}
   </select>
 
   <!-- Simple: WhereClause (상품별 리뷰) -->
   <select id="GetByProductIdAsync" resultMap="ReviewResult">
-    SELECT id, user_id, product_id, rating, title, content, is_verified, helpful_count, created_at, updated_at
+    SELECT id, user_id, product_id, rating, comment, created_at
     FROM reviews
     WHERE product_id = #{productId}
     ORDER BY created_at DESC
@@ -39,7 +36,7 @@
   <!-- Medium: TwoThreeJoin (Review + User + Product) -->
   <select id="GetWithDetailsAsync" resultType="NuVatis.Benchmark.Core.Models.Review">
     SELECT
-        r.id, r.user_id, r.product_id, r.rating, r.title, r.content, r.is_verified, r.helpful_count, r.created_at, r.updated_at
+        r.id, r.user_id, r.product_id, r.rating, r.comment AS Content, r.created_at
     FROM reviews r
     INNER JOIN users u ON r.user_id = u.id
     INNER JOIN products p ON r.product_id = p.id
@@ -59,7 +56,7 @@
     ORDER BY Value DESC
   </select>
 
-  <!-- Complex: WindowFunctions (리뷰별 순위) -->
+  <!-- Complex: WindowFunctions (리뷰별 순위) - DB 스키마에 맞춤 -->
   <select id="GetTopReviewsByProductAsync" resultType="dynamic">
     WITH ranked_reviews AS (
       SELECT
@@ -67,35 +64,32 @@
           product_id,
           user_id,
           rating,
-          helpful_count,
-          ROW_NUMBER() OVER (PARTITION BY product_id ORDER BY helpful_count DESC, created_at DESC) AS rank
+          ROW_NUMBER() OVER (PARTITION BY product_id ORDER BY rating DESC, created_at DESC) AS rank
       FROM reviews
-      WHERE is_verified = true
     )
     SELECT
         product_id,
         user_id,
         rating,
-        helpful_count,
         rank
     FROM ranked_reviews
     WHERE rank &lt;= #{topN}
     ORDER BY product_id, rank
   </select>
 
-  <!-- Simple: InsertSingle -->
+  <!-- Simple: InsertSingle - DB 스키마에 맞춤 -->
   <insert id="InsertAsync">
-    INSERT INTO reviews (user_id, product_id, rating, title, content, is_verified, helpful_count, created_at, updated_at)
-    VALUES (#{UserId}, #{ProductId}, #{Rating}, #{Title}, #{Content}, #{IsVerified}, #{HelpfulCount}, #{CreatedAt}, #{UpdatedAt})
+    INSERT INTO reviews (user_id, product_id, rating, comment, created_at)
+    VALUES (#{UserId}, #{ProductId}, #{Rating}, #{Content}, #{CreatedAt})
     RETURNING id
   </insert>
 
-  <!-- Medium: BulkInsert1K -->
+  <!-- Medium: BulkInsert1K - DB 스키마에 맞춤 -->
   <insert id="BulkInsertAsync">
-    INSERT INTO reviews (user_id, product_id, rating, title, content, is_verified, helpful_count, created_at, updated_at)
+    INSERT INTO reviews (user_id, product_id, rating, comment, created_at)
     VALUES
     <foreach collection="reviews" item="review" separator=",">
-      (#{review.UserId}, #{review.ProductId}, #{review.Rating}, #{review.Title}, #{review.Content}, #{review.IsVerified}, #{review.HelpfulCount}, #{review.CreatedAt}, #{review.UpdatedAt})
+      (#{review.UserId}, #{review.ProductId}, #{review.Rating}, #{review.Content}, #{review.CreatedAt})
     </foreach>
   </insert>
 

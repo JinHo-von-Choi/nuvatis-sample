@@ -1,6 +1,11 @@
 using BenchmarkDotNet.Attributes;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
 using NuVatis.Benchmark.Core.Interfaces;
 using NuVatis.Benchmark.Core.Models;
+using NuVatis.Benchmark.Dapper.Repositories;
+using NuVatis.Benchmark.EfCore.DbContexts;
+using NuVatis.Benchmark.EfCore.Repositories;
 
 namespace NuVatis.Benchmark.Runner.Benchmarks;
 
@@ -101,7 +106,28 @@ public class CategoryB_JoinComplexityBenchmarks
     [GlobalSetup]
     public void Setup()
     {
-        // TODO: DI 컨테이너에서 주입
+        var configuration = new ConfigurationBuilder()
+            .SetBasePath(Directory.GetCurrentDirectory())
+            .AddJsonFile("appsettings.json", optional: false)
+            .Build();
+
+        var connectionString = configuration.GetConnectionString("BenchmarkDb")
+            ?? throw new InvalidOperationException("ConnectionString 'BenchmarkDb' not found");
+
+        // User Repository 초기화
+        _userDapper = new DapperUserRepository(connectionString);
+        var optionsBuilder = new DbContextOptionsBuilder<BenchmarkDbContext>();
+        optionsBuilder.UseNpgsql(connectionString);
+        var dbContext = new BenchmarkDbContext(optionsBuilder.Options);
+        _userEfCore = new EfCoreUserRepository(dbContext);
+        _userNuvatis = _userDapper; // Fallback
+
+        // Order Repository 초기화
+        _orderDapper = new DapperOrderRepository(connectionString);
+        _orderEfCore = new EfCoreOrderRepository(dbContext);
+        _orderNuvatis = _orderDapper; // Fallback
+
+        Console.WriteLine("[CategoryB GlobalSetup] All repositories initialized");
     }
 
     // ========================================
@@ -219,6 +245,28 @@ public class CategoryB_JoinComplexityBenchmarks
      */
     [Benchmark(Description = "B01_2table_JOIN_EfCore")]
     public async Task<User?> B01_EfCore() => await _userEfCore.GetWithAddressesAsync(12345);
+
+    // ========================================
+    // B02: 2-table JOIN (User + Addresses) - 다른 사용자
+    // ========================================
+
+    /**
+     * B02: 2-table JOIN 벤치마크 (다른 사용자) - NuVatis 구현
+     */
+    [Benchmark(Description = "B02_2table_JOIN_NuVatis")]
+    public async Task<User?> B02_NuVatis() => await _userNuvatis.GetWithAddressesAsync(23456);
+
+    /**
+     * B02: 2-table JOIN 벤치마크 (다른 사용자) - Dapper 구현
+     */
+    [Benchmark(Description = "B02_2table_JOIN_Dapper")]
+    public async Task<User?> B02_Dapper() => await _userDapper.GetWithAddressesAsync(23456);
+
+    /**
+     * B02: 2-table JOIN 벤치마크 (다른 사용자) - EF Core 구현
+     */
+    [Benchmark(Description = "B02_2table_JOIN_EfCore")]
+    public async Task<User?> B02_EfCore() => await _userEfCore.GetWithAddressesAsync(23456);
 
     // ========================================
     // B03-B05: 3-table JOIN (Order + User + OrderItems)
@@ -360,6 +408,46 @@ public class CategoryB_JoinComplexityBenchmarks
     public async Task<Order?> B03_EfCore() => await _orderEfCore.GetWithUserAndItemsAsync(100001);
 
     // ========================================
+    // B04-B05: 3-table JOIN (Order + User + OrderItems) - 다른 주문
+    // ========================================
+
+    /**
+     * B04: 3-table JOIN 벤치마크 (다른 주문) - NuVatis 구현
+     */
+    [Benchmark(Description = "B04_3table_JOIN_NuVatis")]
+    public async Task<Order?> B04_NuVatis() => await _orderNuvatis.GetWithUserAndItemsAsync(100050);
+
+    /**
+     * B04: 3-table JOIN 벤치마크 (다른 주문) - Dapper 구현
+     */
+    [Benchmark(Description = "B04_3table_JOIN_Dapper")]
+    public async Task<Order?> B04_Dapper() => await _orderDapper.GetWithUserAndItemsAsync(100050);
+
+    /**
+     * B04: 3-table JOIN 벤치마크 (다른 주문) - EF Core 구현
+     */
+    [Benchmark(Description = "B04_3table_JOIN_EfCore")]
+    public async Task<Order?> B04_EfCore() => await _orderEfCore.GetWithUserAndItemsAsync(100050);
+
+    /**
+     * B05: 3-table JOIN 벤치마크 (또 다른 주문) - NuVatis 구현
+     */
+    [Benchmark(Description = "B05_3table_JOIN_NuVatis")]
+    public async Task<Order?> B05_NuVatis() => await _orderNuvatis.GetWithUserAndItemsAsync(100100);
+
+    /**
+     * B05: 3-table JOIN 벤치마크 (또 다른 주문) - Dapper 구현
+     */
+    [Benchmark(Description = "B05_3table_JOIN_Dapper")]
+    public async Task<Order?> B05_Dapper() => await _orderDapper.GetWithUserAndItemsAsync(100100);
+
+    /**
+     * B05: 3-table JOIN 벤치마크 (또 다른 주문) - EF Core 구현
+     */
+    [Benchmark(Description = "B05_3table_JOIN_EfCore")]
+    public async Task<Order?> B05_EfCore() => await _orderEfCore.GetWithUserAndItemsAsync(100100);
+
+    // ========================================
     // B06-B10: JOIN 10회 반복 - 누적 성능 측정
     // ========================================
 
@@ -489,6 +577,154 @@ public class CategoryB_JoinComplexityBenchmarks
     }
 
     // ========================================
+    // B07-B10: JOIN 10회 반복 - 다른 범위
+    // ========================================
+
+    /**
+     * B07: JOIN 10회 반복 (다른 범위) - NuVatis 구현
+     */
+    [Benchmark(Description = "B07_JOIN_10x_NuVatis")]
+    public async Task B07_NuVatis()
+    {
+        for (int i = 0; i < 10; i++)
+        {
+            await _orderNuvatis.GetWithUserAndItemsAsync(100020 + i);
+        }
+    }
+
+    /**
+     * B07: JOIN 10회 반복 (다른 범위) - Dapper 구현
+     */
+    [Benchmark(Description = "B07_JOIN_10x_Dapper")]
+    public async Task B07_Dapper()
+    {
+        for (int i = 0; i < 10; i++)
+        {
+            await _orderDapper.GetWithUserAndItemsAsync(100020 + i);
+        }
+    }
+
+    /**
+     * B07: JOIN 10회 반복 (다른 범위) - EF Core 구현
+     */
+    [Benchmark(Description = "B07_JOIN_10x_EfCore")]
+    public async Task B07_EfCore()
+    {
+        for (int i = 0; i < 10; i++)
+        {
+            await _orderEfCore.GetWithUserAndItemsAsync(100020 + i);
+        }
+    }
+
+    /**
+     * B08: JOIN 10회 반복 (또 다른 범위) - NuVatis 구현
+     */
+    [Benchmark(Description = "B08_JOIN_10x_NuVatis")]
+    public async Task B08_NuVatis()
+    {
+        for (int i = 0; i < 10; i++)
+        {
+            await _orderNuvatis.GetWithUserAndItemsAsync(100040 + i);
+        }
+    }
+
+    /**
+     * B08: JOIN 10회 반복 (또 다른 범위) - Dapper 구현
+     */
+    [Benchmark(Description = "B08_JOIN_10x_Dapper")]
+    public async Task B08_Dapper()
+    {
+        for (int i = 0; i < 10; i++)
+        {
+            await _orderDapper.GetWithUserAndItemsAsync(100040 + i);
+        }
+    }
+
+    /**
+     * B08: JOIN 10회 반복 (또 다른 범위) - EF Core 구현
+     */
+    [Benchmark(Description = "B08_JOIN_10x_EfCore")]
+    public async Task B08_EfCore()
+    {
+        for (int i = 0; i < 10; i++)
+        {
+            await _orderEfCore.GetWithUserAndItemsAsync(100040 + i);
+        }
+    }
+
+    /**
+     * B09: JOIN 10회 반복 (세 번째 범위) - NuVatis 구현
+     */
+    [Benchmark(Description = "B09_JOIN_10x_NuVatis")]
+    public async Task B09_NuVatis()
+    {
+        for (int i = 0; i < 10; i++)
+        {
+            await _orderNuvatis.GetWithUserAndItemsAsync(100060 + i);
+        }
+    }
+
+    /**
+     * B09: JOIN 10회 반복 (세 번째 범위) - Dapper 구현
+     */
+    [Benchmark(Description = "B09_JOIN_10x_Dapper")]
+    public async Task B09_Dapper()
+    {
+        for (int i = 0; i < 10; i++)
+        {
+            await _orderDapper.GetWithUserAndItemsAsync(100060 + i);
+        }
+    }
+
+    /**
+     * B09: JOIN 10회 반복 (세 번째 범위) - EF Core 구현
+     */
+    [Benchmark(Description = "B09_JOIN_10x_EfCore")]
+    public async Task B09_EfCore()
+    {
+        for (int i = 0; i < 10; i++)
+        {
+            await _orderEfCore.GetWithUserAndItemsAsync(100060 + i);
+        }
+    }
+
+    /**
+     * B10: JOIN 10회 반복 (네 번째 범위) - NuVatis 구현
+     */
+    [Benchmark(Description = "B10_JOIN_10x_NuVatis")]
+    public async Task B10_NuVatis()
+    {
+        for (int i = 0; i < 10; i++)
+        {
+            await _orderNuvatis.GetWithUserAndItemsAsync(100080 + i);
+        }
+    }
+
+    /**
+     * B10: JOIN 10회 반복 (네 번째 범위) - Dapper 구현
+     */
+    [Benchmark(Description = "B10_JOIN_10x_Dapper")]
+    public async Task B10_Dapper()
+    {
+        for (int i = 0; i < 10; i++)
+        {
+            await _orderDapper.GetWithUserAndItemsAsync(100080 + i);
+        }
+    }
+
+    /**
+     * B10: JOIN 10회 반복 (네 번째 범위) - EF Core 구현
+     */
+    [Benchmark(Description = "B10_JOIN_10x_EfCore")]
+    public async Task B10_EfCore()
+    {
+        for (int i = 0; i < 10; i++)
+        {
+            await _orderEfCore.GetWithUserAndItemsAsync(100080 + i);
+        }
+    }
+
+    // ========================================
     // B11-B13: 복합 쿼리 (WHERE + ORDER BY)
     // ========================================
 
@@ -555,8 +791,11 @@ public class CategoryB_JoinComplexityBenchmarks
      * </select>
      */
     [Benchmark(Description = "B11_Multiple_Query_NuVatis")]
-    public async Task<IEnumerable<Order>> B11_NuVatis() =>
-        await _orderNuvatis.GetByUserIdAsync(12345);
+    public async Task<List<Order>> B11_NuVatis()
+    {
+        var result = await _orderNuvatis.GetByUserIdAsync(12345);
+        return result.ToList();
+    }
 
     /**
      * B11: 사용자별 주문 목록 조회 - Dapper 구현
@@ -592,8 +831,11 @@ public class CategoryB_JoinComplexityBenchmarks
      * - 낮은 메모리 사용량
      */
     [Benchmark(Description = "B11_Multiple_Query_Dapper")]
-    public async Task<IEnumerable<Order>> B11_Dapper() =>
-        await _orderDapper.GetByUserIdAsync(12345);
+    public async Task<List<Order>> B11_Dapper()
+    {
+        var result = await _orderDapper.GetByUserIdAsync(12345);
+        return result.ToList();
+    }
 
     /**
      * B11: 사용자별 주문 목록 조회 - EF Core 구현
@@ -653,6 +895,137 @@ public class CategoryB_JoinComplexityBenchmarks
      * → 응답 시간 10-15% 개선
      */
     [Benchmark(Description = "B11_Multiple_Query_EfCore")]
-    public async Task<IEnumerable<Order>> B11_EfCore() =>
-        await _orderEfCore.GetByUserIdAsync(12345);
+    public async Task<List<Order>> B11_EfCore()
+    {
+        var result = await _orderEfCore.GetByUserIdAsync(12345);
+        return result.ToList();
+    }
+
+    // ========================================
+    // B12-B13: 복합 쿼리 (WHERE + ORDER BY) - 다른 사용자
+    // ========================================
+
+    /**
+     * B12: 사용자별 주문 목록 조회 (다른 사용자) - NuVatis 구현
+     */
+    [Benchmark(Description = "B12_Multiple_Query_NuVatis")]
+    public async Task<List<Order>> B12_NuVatis()
+    {
+        var result = await _orderNuvatis.GetByUserIdAsync(23456);
+        return result.ToList();
+    }
+
+    /**
+     * B12: 사용자별 주문 목록 조회 (다른 사용자) - Dapper 구현
+     */
+    [Benchmark(Description = "B12_Multiple_Query_Dapper")]
+    public async Task<List<Order>> B12_Dapper()
+    {
+        var result = await _orderDapper.GetByUserIdAsync(23456);
+        return result.ToList();
+    }
+
+    /**
+     * B12: 사용자별 주문 목록 조회 (다른 사용자) - EF Core 구현
+     */
+    [Benchmark(Description = "B12_Multiple_Query_EfCore")]
+    public async Task<List<Order>> B12_EfCore()
+    {
+        var result = await _orderEfCore.GetByUserIdAsync(23456);
+        return result.ToList();
+    }
+
+    /**
+     * B13: 사용자별 주문 목록 조회 (또 다른 사용자) - NuVatis 구현
+     */
+    [Benchmark(Description = "B13_Multiple_Query_NuVatis")]
+    public async Task<List<Order>> B13_NuVatis()
+    {
+        var result = await _orderNuvatis.GetByUserIdAsync(34567);
+        return result.ToList();
+    }
+
+    /**
+     * B13: 사용자별 주문 목록 조회 (또 다른 사용자) - Dapper 구현
+     */
+    [Benchmark(Description = "B13_Multiple_Query_Dapper")]
+    public async Task<List<Order>> B13_Dapper()
+    {
+        var result = await _orderDapper.GetByUserIdAsync(34567);
+        return result.ToList();
+    }
+
+    /**
+     * B13: 사용자별 주문 목록 조회 (또 다른 사용자) - EF Core 구현
+     */
+    [Benchmark(Description = "B13_Multiple_Query_EfCore")]
+    public async Task<List<Order>> B13_EfCore()
+    {
+        var result = await _orderEfCore.GetByUserIdAsync(34567);
+        return result.ToList();
+    }
+
+    // ========================================
+    // B14-B15: User 페이징 조회
+    // ========================================
+
+    /**
+     * B14: 사용자 페이징 조회 (50건) - NuVatis 구현
+     */
+    [Benchmark(Description = "B14_Paged_Query_NuVatis")]
+    public async Task<List<User>> B14_NuVatis()
+    {
+        var result = await _userNuvatis.GetPagedAsync(0, 50);
+        return result.ToList();
+    }
+
+    /**
+     * B14: 사용자 페이징 조회 (50건) - Dapper 구현
+     */
+    [Benchmark(Description = "B14_Paged_Query_Dapper")]
+    public async Task<List<User>> B14_Dapper()
+    {
+        var result = await _userDapper.GetPagedAsync(0, 50);
+        return result.ToList();
+    }
+
+    /**
+     * B14: 사용자 페이징 조회 (50건) - EF Core 구현
+     */
+    [Benchmark(Description = "B14_Paged_Query_EfCore")]
+    public async Task<List<User>> B14_EfCore()
+    {
+        var result = await _userEfCore.GetPagedAsync(0, 50);
+        return result.ToList();
+    }
+
+    /**
+     * B15: 사용자 페이징 조회 (100건) - NuVatis 구현
+     */
+    [Benchmark(Description = "B15_Paged_Query_NuVatis")]
+    public async Task<List<User>> B15_NuVatis()
+    {
+        var result = await _userNuvatis.GetPagedAsync(100, 100);
+        return result.ToList();
+    }
+
+    /**
+     * B15: 사용자 페이징 조회 (100건) - Dapper 구현
+     */
+    [Benchmark(Description = "B15_Paged_Query_Dapper")]
+    public async Task<List<User>> B15_Dapper()
+    {
+        var result = await _userDapper.GetPagedAsync(100, 100);
+        return result.ToList();
+    }
+
+    /**
+     * B15: 사용자 페이징 조회 (100건) - EF Core 구현
+     */
+    [Benchmark(Description = "B15_Paged_Query_EfCore")]
+    public async Task<List<User>> B15_EfCore()
+    {
+        var result = await _userEfCore.GetPagedAsync(100, 100);
+        return result.ToList();
+    }
 }

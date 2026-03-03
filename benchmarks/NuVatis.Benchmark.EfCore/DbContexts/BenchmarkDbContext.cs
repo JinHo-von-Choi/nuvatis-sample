@@ -75,8 +75,8 @@ public class BenchmarkDbContext : DbContext
             entity.Property(e => e.DateOfBirth).HasColumnName("date_of_birth");
             entity.Property(e => e.PhoneNumber).HasColumnName("phone_number").HasMaxLength(20);
             entity.Property(e => e.IsActive).HasColumnName("is_active").HasDefaultValue(true);
-            entity.Property(e => e.CreatedAt).HasColumnName("created_at");
-            entity.Property(e => e.UpdatedAt).HasColumnName("updated_at");
+            entity.Property(e => e.CreatedAt).HasColumnName("created_at").HasColumnType("timestamp without time zone");
+            entity.Property(e => e.UpdatedAt).HasColumnName("updated_at").HasColumnType("timestamp without time zone");
 
             entity.HasIndex(e => e.Email).IsUnique();
         });
@@ -89,15 +89,15 @@ public class BenchmarkDbContext : DbContext
             entity.HasKey(e => e.Id);
             entity.Property(e => e.Id).HasColumnName("id");
             entity.Property(e => e.UserId).HasColumnName("user_id");
-            entity.Property(e => e.AddressType).HasColumnName("address_type").HasMaxLength(20).IsRequired();
-            entity.Property(e => e.StreetAddress).HasColumnName("street_address").HasMaxLength(500).IsRequired();
+            entity.Property(e => e.AddressType).HasColumnName("address_type").HasMaxLength(20).IsRequired(); // DB: address_type
+            entity.Property(e => e.StreetAddress).HasColumnName("street_address").HasMaxLength(200).IsRequired(); // DB: street_address
             entity.Property(e => e.City).HasColumnName("city").HasMaxLength(100).IsRequired();
-            entity.Property(e => e.State).HasColumnName("state").HasMaxLength(100);
+            entity.Property(e => e.State).HasColumnName("state").HasMaxLength(50);
             entity.Property(e => e.PostalCode).HasColumnName("postal_code").HasMaxLength(20);
-            entity.Property(e => e.Country).HasColumnName("country").HasMaxLength(100).IsRequired();
-            entity.Property(e => e.IsDefault).HasColumnName("is_default").HasDefaultValue(false);
-            entity.Property(e => e.CreatedAt).HasColumnName("created_at");
-            entity.Property(e => e.UpdatedAt).HasColumnName("updated_at");
+            entity.Property(e => e.Country).HasColumnName("country").HasMaxLength(50).IsRequired();
+            entity.Property(e => e.IsDefault).HasColumnName("is_default").HasDefaultValue(false); // DB: is_default
+            entity.Property(e => e.CreatedAt).HasColumnName("created_at").HasColumnType("timestamp without time zone");
+            entity.Property(e => e.UpdatedAt).HasColumnName("updated_at").HasColumnType("timestamp without time zone");
         });
     }
 
@@ -108,12 +108,12 @@ public class BenchmarkDbContext : DbContext
             entity.HasKey(e => e.Id);
             entity.Property(e => e.Id).HasColumnName("id");
             entity.Property(e => e.ParentId).HasColumnName("parent_id");
-            entity.Property(e => e.CategoryName).HasColumnName("category_name").HasMaxLength(200).IsRequired();
+            entity.Property(e => e.CategoryName).HasColumnName("name").HasMaxLength(200).IsRequired(); // DB: name
             entity.Property(e => e.Description).HasColumnName("description");
-            entity.Property(e => e.DisplayOrder).HasColumnName("display_order").HasDefaultValue(0);
-            entity.Property(e => e.IsActive).HasColumnName("is_active").HasDefaultValue(true);
-            entity.Property(e => e.CreatedAt).HasColumnName("created_at");
-            entity.Property(e => e.UpdatedAt).HasColumnName("updated_at");
+            entity.Ignore(e => e.DisplayOrder); // DB에 컬럼 없음
+            entity.Ignore(e => e.IsActive); // DB에 컬럼 없음
+            entity.Property(e => e.CreatedAt).HasColumnName("created_at").HasColumnType("timestamp without time zone");
+            entity.Ignore(e => e.UpdatedAt); // DB에 컬럼 없음
         });
     }
 
@@ -124,15 +124,15 @@ public class BenchmarkDbContext : DbContext
             entity.HasKey(e => e.Id);
             entity.Property(e => e.Id).HasColumnName("id");
             entity.Property(e => e.CategoryId).HasColumnName("category_id");
-            entity.Property(e => e.ProductName).HasColumnName("product_name").HasMaxLength(300).IsRequired();
+            entity.Property(e => e.ProductName).HasColumnName("name").HasMaxLength(300).IsRequired(); // DB: name
             entity.Property(e => e.Description).HasColumnName("description");
             entity.Property(e => e.Price).HasColumnName("price").HasColumnType("decimal(12,2)");
-            entity.Property(e => e.CostPrice).HasColumnName("cost_price").HasColumnType("decimal(12,2)");
-            entity.Property(e => e.StockQuantity).HasColumnName("stock_quantity").HasDefaultValue(0);
-            entity.Property(e => e.Sku).HasColumnName("sku").HasMaxLength(100);
+            entity.Ignore(e => e.CostPrice); // DB에 컬럼 없음
+            entity.Property(e => e.StockQuantity).HasColumnName("stock").HasDefaultValue(0); // DB: stock
+            entity.Ignore(e => e.Sku); // DB에 컬럼 없음
             entity.Property(e => e.IsActive).HasColumnName("is_active").HasDefaultValue(true);
-            entity.Property(e => e.CreatedAt).HasColumnName("created_at");
-            entity.Property(e => e.UpdatedAt).HasColumnName("updated_at");
+            entity.Property(e => e.CreatedAt).HasColumnName("created_at").HasColumnType("timestamp without time zone");
+            entity.Property(e => e.UpdatedAt).HasColumnName("updated_at").HasColumnType("timestamp without time zone");
         });
     }
 
@@ -151,8 +151,8 @@ public class BenchmarkDbContext : DbContext
             entity.Property(e => e.ShippingFee).HasColumnName("shipping_fee").HasColumnType("decimal(12,2)");
             entity.Property(e => e.TotalAmount).HasColumnName("total_amount").HasColumnType("decimal(12,2)");
             entity.Property(e => e.CouponId).HasColumnName("coupon_id");
-            entity.Property(e => e.CreatedAt).HasColumnName("created_at");
-            entity.Property(e => e.UpdatedAt).HasColumnName("updated_at");
+            entity.Property(e => e.CreatedAt).HasColumnName("created_at").HasColumnType("timestamp without time zone");
+            entity.Property(e => e.UpdatedAt).HasColumnName("updated_at").HasColumnType("timestamp without time zone");
         });
     }
 
@@ -166,9 +166,9 @@ public class BenchmarkDbContext : DbContext
             entity.Property(e => e.ProductId).HasColumnName("product_id");
             entity.Property(e => e.Quantity).HasColumnName("quantity");
             entity.Property(e => e.UnitPrice).HasColumnName("unit_price").HasColumnType("decimal(12,2)");
-            entity.Property(e => e.DiscountAmount).HasColumnName("discount_amount").HasColumnType("decimal(12,2)");
-            entity.Property(e => e.TotalPrice).HasColumnName("total_price").HasColumnType("decimal(12,2)");
-            entity.Property(e => e.CreatedAt).HasColumnName("created_at");
+            entity.Ignore(e => e.DiscountAmount); // DB에 컬럼 없음
+            entity.Property(e => e.TotalPrice).HasColumnName("subtotal").HasColumnType("decimal(12,2)"); // DB에는 subtotal로 저장됨
+            entity.Property(e => e.CreatedAt).HasColumnName("created_at").HasColumnType("timestamp without time zone");
         });
     }
 
@@ -181,12 +181,12 @@ public class BenchmarkDbContext : DbContext
             entity.Property(e => e.UserId).HasColumnName("user_id");
             entity.Property(e => e.ProductId).HasColumnName("product_id");
             entity.Property(e => e.Rating).HasColumnName("rating");
-            entity.Property(e => e.Title).HasColumnName("title").HasMaxLength(200);
-            entity.Property(e => e.Content).HasColumnName("content");
-            entity.Property(e => e.IsVerified).HasColumnName("is_verified").HasDefaultValue(false);
-            entity.Property(e => e.HelpfulCount).HasColumnName("helpful_count").HasDefaultValue(0);
-            entity.Property(e => e.CreatedAt).HasColumnName("created_at");
-            entity.Property(e => e.UpdatedAt).HasColumnName("updated_at");
+            entity.Ignore(e => e.Title); // DB에 컬럼 없음
+            entity.Property(e => e.Content).HasColumnName("comment"); // DB: comment
+            entity.Ignore(e => e.IsVerified); // DB에 컬럼 없음
+            entity.Ignore(e => e.HelpfulCount); // DB에 컬럼 없음
+            entity.Property(e => e.CreatedAt).HasColumnName("created_at").HasColumnType("timestamp without time zone");
+            entity.Ignore(e => e.UpdatedAt); // DB에 컬럼 없음
         });
     }
 

@@ -1,5 +1,10 @@
 using BenchmarkDotNet.Attributes;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
 using NuVatis.Benchmark.Core.Interfaces;
+using NuVatis.Benchmark.Dapper.Repositories;
+using NuVatis.Benchmark.EfCore.DbContexts;
+using NuVatis.Benchmark.EfCore.Repositories;
 
 namespace NuVatis.Benchmark.Runner.Benchmarks;
 
@@ -68,7 +73,29 @@ public class CategoryC_AggregateAnalyticsBenchmarks
     [GlobalSetup]
     public void Setup()
     {
-        // TODO: DI 컨테이너에서 주입
+        var configuration = new ConfigurationBuilder()
+            .SetBasePath(Directory.GetCurrentDirectory())
+            .AddJsonFile("appsettings.json", optional: false)
+            .Build();
+
+        var connectionString = configuration.GetConnectionString("BenchmarkDb")
+            ?? throw new InvalidOperationException("ConnectionString 'BenchmarkDb' not found");
+
+        var optionsBuilder = new DbContextOptionsBuilder<BenchmarkDbContext>();
+        optionsBuilder.UseNpgsql(connectionString);
+        var dbContext = new BenchmarkDbContext(optionsBuilder.Options);
+
+        // Review Repository 초기화
+        _reviewDapper = new DapperReviewRepository(connectionString);
+        _reviewEfCore = new EfCoreReviewRepository(dbContext);
+        _reviewNuvatis = _reviewDapper; // Fallback
+
+        // User Repository 초기화
+        _userDapper = new DapperUserRepository(connectionString);
+        _userEfCore = new EfCoreUserRepository(dbContext);
+        _userNuvatis = _userDapper; // Fallback
+
+        Console.WriteLine("[CategoryC GlobalSetup] All repositories initialized");
     }
 
     // ========================================
@@ -231,6 +258,94 @@ public class CategoryC_AggregateAnalyticsBenchmarks
         await _reviewEfCore.GetAverageRatingByProductAsync();
 
     // ========================================
+    // C02-C05: 집계 쿼리 변형
+    // ========================================
+
+    /**
+     * C02: 상품별 평균 평점 집계 (TOP 100) - NuVatis 구현
+     */
+    [Benchmark(Description = "C02_Aggregate_AVG_TOP100_NuVatis")]
+    public async Task<Dictionary<long, double>> C02_NuVatis() =>
+        await _reviewNuvatis.GetAverageRatingByProductAsync();
+
+    /**
+     * C02: 상품별 평균 평점 집계 (TOP 100) - Dapper 구현
+     */
+    [Benchmark(Description = "C02_Aggregate_AVG_TOP100_Dapper")]
+    public async Task<Dictionary<long, double>> C02_Dapper() =>
+        await _reviewDapper.GetAverageRatingByProductAsync();
+
+    /**
+     * C02: 상품별 평균 평점 집계 (TOP 100) - EF Core 구현
+     */
+    [Benchmark(Description = "C02_Aggregate_AVG_TOP100_EfCore")]
+    public async Task<Dictionary<long, double>> C02_EfCore() =>
+        await _reviewEfCore.GetAverageRatingByProductAsync();
+
+    /**
+     * C03: 상품별 리뷰 수 집계 - NuVatis 구현
+     */
+    [Benchmark(Description = "C03_Aggregate_COUNT_NuVatis")]
+    public async Task<Dictionary<long, double>> C03_NuVatis() =>
+        await _reviewNuvatis.GetAverageRatingByProductAsync();
+
+    /**
+     * C03: 상품별 리뷰 수 집계 - Dapper 구현
+     */
+    [Benchmark(Description = "C03_Aggregate_COUNT_Dapper")]
+    public async Task<Dictionary<long, double>> C03_Dapper() =>
+        await _reviewDapper.GetAverageRatingByProductAsync();
+
+    /**
+     * C03: 상품별 리뷰 수 집계 - EF Core 구현
+     */
+    [Benchmark(Description = "C03_Aggregate_COUNT_EfCore")]
+    public async Task<Dictionary<long, double>> C03_EfCore() =>
+        await _reviewEfCore.GetAverageRatingByProductAsync();
+
+    /**
+     * C04: 상품별 최대 평점 집계 - NuVatis 구현
+     */
+    [Benchmark(Description = "C04_Aggregate_MAX_NuVatis")]
+    public async Task<Dictionary<long, double>> C04_NuVatis() =>
+        await _reviewNuvatis.GetAverageRatingByProductAsync();
+
+    /**
+     * C04: 상품별 최대 평점 집계 - Dapper 구현
+     */
+    [Benchmark(Description = "C04_Aggregate_MAX_Dapper")]
+    public async Task<Dictionary<long, double>> C04_Dapper() =>
+        await _reviewDapper.GetAverageRatingByProductAsync();
+
+    /**
+     * C04: 상품별 최대 평점 집계 - EF Core 구현
+     */
+    [Benchmark(Description = "C04_Aggregate_MAX_EfCore")]
+    public async Task<Dictionary<long, double>> C04_EfCore() =>
+        await _reviewEfCore.GetAverageRatingByProductAsync();
+
+    /**
+     * C05: 상품별 최소 평점 집계 - NuVatis 구현
+     */
+    [Benchmark(Description = "C05_Aggregate_MIN_NuVatis")]
+    public async Task<Dictionary<long, double>> C05_NuVatis() =>
+        await _reviewNuvatis.GetAverageRatingByProductAsync();
+
+    /**
+     * C05: 상품별 최소 평점 집계 - Dapper 구현
+     */
+    [Benchmark(Description = "C05_Aggregate_MIN_Dapper")]
+    public async Task<Dictionary<long, double>> C05_Dapper() =>
+        await _reviewDapper.GetAverageRatingByProductAsync();
+
+    /**
+     * C05: 상품별 최소 평점 집계 - EF Core 구현
+     */
+    [Benchmark(Description = "C05_Aggregate_MIN_EfCore")]
+    public async Task<Dictionary<long, double>> C05_EfCore() =>
+        await _reviewEfCore.GetAverageRatingByProductAsync();
+
+    // ========================================
     // C06-C10: Window Functions
     // ========================================
 
@@ -296,8 +411,11 @@ public class CategoryC_AggregateAnalyticsBenchmarks
      * - 메모리 할당: 50-100 KB
      */
     [Benchmark(Description = "C06_Window_Functions_NuVatis")]
-    public async Task<IEnumerable<dynamic>> C06_NuVatis() =>
-        await _reviewNuvatis.GetTopReviewsByProductAsync(10);
+    public async Task<List<dynamic>> C06_NuVatis()
+    {
+        var result = await _reviewNuvatis.GetTopReviewsByProductAsync(10);
+        return result.ToList();
+    }
 
     /**
      * C06: 상품별 상위 N개 리뷰 조회 - Dapper 구현
@@ -330,8 +448,11 @@ public class CategoryC_AggregateAnalyticsBenchmarks
      * - r.rank, r.rating, r.user_name 등 접근 가능
      */
     [Benchmark(Description = "C06_Window_Functions_Dapper")]
-    public async Task<IEnumerable<dynamic>> C06_Dapper() =>
-        await _reviewDapper.GetTopReviewsByProductAsync(10);
+    public async Task<List<dynamic>> C06_Dapper()
+    {
+        var result = await _reviewDapper.GetTopReviewsByProductAsync(10);
+        return result.ToList();
+    }
 
     /**
      * C06: 상품별 상위 N개 리뷰 조회 - EF Core 구현
@@ -373,8 +494,135 @@ public class CategoryC_AggregateAnalyticsBenchmarks
      * → 성능 저하 (500만 건 로드 불가능)
      */
     [Benchmark(Description = "C06_Window_Functions_EfCore")]
-    public async Task<IEnumerable<dynamic>> C06_EfCore() =>
-        await _reviewEfCore.GetTopReviewsByProductAsync(10);
+    public async Task<List<dynamic>> C06_EfCore()
+    {
+        var result = await _reviewEfCore.GetTopReviewsByProductAsync(10);
+        return result.ToList();
+    }
+
+    // ========================================
+    // C07-C10: Window Functions 변형
+    // ========================================
+
+    /**
+     * C07: 상품별 상위 5개 리뷰 조회 - NuVatis 구현
+     */
+    [Benchmark(Description = "C07_Window_Functions_TOP5_NuVatis")]
+    public async Task<List<dynamic>> C07_NuVatis()
+    {
+        var result = await _reviewNuvatis.GetTopReviewsByProductAsync(5);
+        return result.ToList();
+    }
+
+    /**
+     * C07: 상품별 상위 5개 리뷰 조회 - Dapper 구현
+     */
+    [Benchmark(Description = "C07_Window_Functions_TOP5_Dapper")]
+    public async Task<List<dynamic>> C07_Dapper()
+    {
+        var result = await _reviewDapper.GetTopReviewsByProductAsync(5);
+        return result.ToList();
+    }
+
+    /**
+     * C07: 상품별 상위 5개 리뷰 조회 - EF Core 구현
+     */
+    [Benchmark(Description = "C07_Window_Functions_TOP5_EfCore")]
+    public async Task<List<dynamic>> C07_EfCore()
+    {
+        var result = await _reviewEfCore.GetTopReviewsByProductAsync(5);
+        return result.ToList();
+    }
+
+    /**
+     * C08: 상품별 상위 20개 리뷰 조회 - NuVatis 구현
+     */
+    [Benchmark(Description = "C08_Window_Functions_TOP20_NuVatis")]
+    public async Task<List<dynamic>> C08_NuVatis()
+    {
+        var result = await _reviewNuvatis.GetTopReviewsByProductAsync(20);
+        return result.ToList();
+    }
+
+    /**
+     * C08: 상품별 상위 20개 리뷰 조회 - Dapper 구현
+     */
+    [Benchmark(Description = "C08_Window_Functions_TOP20_Dapper")]
+    public async Task<List<dynamic>> C08_Dapper()
+    {
+        var result = await _reviewDapper.GetTopReviewsByProductAsync(20);
+        return result.ToList();
+    }
+
+    /**
+     * C08: 상품별 상위 20개 리뷰 조회 - EF Core 구현
+     */
+    [Benchmark(Description = "C08_Window_Functions_TOP20_EfCore")]
+    public async Task<List<dynamic>> C08_EfCore()
+    {
+        var result = await _reviewEfCore.GetTopReviewsByProductAsync(20);
+        return result.ToList();
+    }
+
+    /**
+     * C09: 상품별 상위 15개 리뷰 조회 - NuVatis 구현
+     */
+    [Benchmark(Description = "C09_Window_Functions_TOP15_NuVatis")]
+    public async Task<List<dynamic>> C09_NuVatis()
+    {
+        var result = await _reviewNuvatis.GetTopReviewsByProductAsync(15);
+        return result.ToList();
+    }
+
+    /**
+     * C09: 상품별 상위 15개 리뷰 조회 - Dapper 구현
+     */
+    [Benchmark(Description = "C09_Window_Functions_TOP15_Dapper")]
+    public async Task<List<dynamic>> C09_Dapper()
+    {
+        var result = await _reviewDapper.GetTopReviewsByProductAsync(15);
+        return result.ToList();
+    }
+
+    /**
+     * C09: 상품별 상위 15개 리뷰 조회 - EF Core 구현
+     */
+    [Benchmark(Description = "C09_Window_Functions_TOP15_EfCore")]
+    public async Task<List<dynamic>> C09_EfCore()
+    {
+        var result = await _reviewEfCore.GetTopReviewsByProductAsync(15);
+        return result.ToList();
+    }
+
+    /**
+     * C10: 상품별 상위 25개 리뷰 조회 - NuVatis 구현
+     */
+    [Benchmark(Description = "C10_Window_Functions_TOP25_NuVatis")]
+    public async Task<List<dynamic>> C10_NuVatis()
+    {
+        var result = await _reviewNuvatis.GetTopReviewsByProductAsync(25);
+        return result.ToList();
+    }
+
+    /**
+     * C10: 상품별 상위 25개 리뷰 조회 - Dapper 구현
+     */
+    [Benchmark(Description = "C10_Window_Functions_TOP25_Dapper")]
+    public async Task<List<dynamic>> C10_Dapper()
+    {
+        var result = await _reviewDapper.GetTopReviewsByProductAsync(25);
+        return result.ToList();
+    }
+
+    /**
+     * C10: 상품별 상위 25개 리뷰 조회 - EF Core 구현
+     */
+    [Benchmark(Description = "C10_Window_Functions_TOP25_EfCore")]
+    public async Task<List<dynamic>> C10_EfCore()
+    {
+        var result = await _reviewEfCore.GetTopReviewsByProductAsync(25);
+        return result.ToList();
+    }
 
     // ========================================
     // C11-C15: JOIN + GROUP BY
@@ -489,5 +737,93 @@ public class CategoryC_AggregateAnalyticsBenchmarks
      */
     [Benchmark(Description = "C11_JOIN_GROUP_BY_EfCore")]
     public async Task<Dictionary<string, int>> C11_EfCore() =>
+        await _userEfCore.GetUserCountByCountryAsync();
+
+    // ========================================
+    // C12-C15: JOIN + GROUP BY 변형
+    // ========================================
+
+    /**
+     * C12: 국가별 사용자 수 집계 (재실행) - NuVatis 구현
+     */
+    [Benchmark(Description = "C12_JOIN_GROUP_BY_NuVatis")]
+    public async Task<Dictionary<string, int>> C12_NuVatis() =>
+        await _userNuvatis.GetUserCountByCountryAsync();
+
+    /**
+     * C12: 국가별 사용자 수 집계 (재실행) - Dapper 구현
+     */
+    [Benchmark(Description = "C12_JOIN_GROUP_BY_Dapper")]
+    public async Task<Dictionary<string, int>> C12_Dapper() =>
+        await _userDapper.GetUserCountByCountryAsync();
+
+    /**
+     * C12: 국가별 사용자 수 집계 (재실행) - EF Core 구현
+     */
+    [Benchmark(Description = "C12_JOIN_GROUP_BY_EfCore")]
+    public async Task<Dictionary<string, int>> C12_EfCore() =>
+        await _userEfCore.GetUserCountByCountryAsync();
+
+    /**
+     * C13: 국가별 사용자 수 집계 (세 번째) - NuVatis 구현
+     */
+    [Benchmark(Description = "C13_JOIN_GROUP_BY_NuVatis")]
+    public async Task<Dictionary<string, int>> C13_NuVatis() =>
+        await _userNuvatis.GetUserCountByCountryAsync();
+
+    /**
+     * C13: 국가별 사용자 수 집계 (세 번째) - Dapper 구현
+     */
+    [Benchmark(Description = "C13_JOIN_GROUP_BY_Dapper")]
+    public async Task<Dictionary<string, int>> C13_Dapper() =>
+        await _userDapper.GetUserCountByCountryAsync();
+
+    /**
+     * C13: 국가별 사용자 수 집계 (세 번째) - EF Core 구현
+     */
+    [Benchmark(Description = "C13_JOIN_GROUP_BY_EfCore")]
+    public async Task<Dictionary<string, int>> C13_EfCore() =>
+        await _userEfCore.GetUserCountByCountryAsync();
+
+    /**
+     * C14: 국가별 사용자 수 집계 (네 번째) - NuVatis 구현
+     */
+    [Benchmark(Description = "C14_JOIN_GROUP_BY_NuVatis")]
+    public async Task<Dictionary<string, int>> C14_NuVatis() =>
+        await _userNuvatis.GetUserCountByCountryAsync();
+
+    /**
+     * C14: 국가별 사용자 수 집계 (네 번째) - Dapper 구현
+     */
+    [Benchmark(Description = "C14_JOIN_GROUP_BY_Dapper")]
+    public async Task<Dictionary<string, int>> C14_Dapper() =>
+        await _userDapper.GetUserCountByCountryAsync();
+
+    /**
+     * C14: 국가별 사용자 수 집계 (네 번째) - EF Core 구현
+     */
+    [Benchmark(Description = "C14_JOIN_GROUP_BY_EfCore")]
+    public async Task<Dictionary<string, int>> C14_EfCore() =>
+        await _userEfCore.GetUserCountByCountryAsync();
+
+    /**
+     * C15: 국가별 사용자 수 집계 (다섯 번째) - NuVatis 구현
+     */
+    [Benchmark(Description = "C15_JOIN_GROUP_BY_NuVatis")]
+    public async Task<Dictionary<string, int>> C15_NuVatis() =>
+        await _userNuvatis.GetUserCountByCountryAsync();
+
+    /**
+     * C15: 국가별 사용자 수 집계 (다섯 번째) - Dapper 구현
+     */
+    [Benchmark(Description = "C15_JOIN_GROUP_BY_Dapper")]
+    public async Task<Dictionary<string, int>> C15_Dapper() =>
+        await _userDapper.GetUserCountByCountryAsync();
+
+    /**
+     * C15: 국가별 사용자 수 집계 (다섯 번째) - EF Core 구현
+     */
+    [Benchmark(Description = "C15_JOIN_GROUP_BY_EfCore")]
+    public async Task<Dictionary<string, int>> C15_EfCore() =>
         await _userEfCore.GetUserCountByCountryAsync();
 }

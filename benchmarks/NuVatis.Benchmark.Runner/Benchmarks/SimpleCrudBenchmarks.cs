@@ -41,29 +41,47 @@ public class SimpleCrudBenchmarks
 
     // Simple 2: WhereClause
     [Benchmark(Description = "WhereClause - NuVatis")]
-    public async Task<IEnumerable<User>> NuVatis_WhereClause()
-        => await _nuvatis.GetByEmailDomainAsync("gmail.com");
+    public async Task<List<User>> NuVatis_WhereClause()
+    {
+        var result = await _nuvatis.GetByEmailDomainAsync("gmail.com");
+        return result.ToList();
+    }
 
     [Benchmark(Description = "WhereClause - Dapper")]
-    public async Task<IEnumerable<User>> Dapper_WhereClause()
-        => await _dapper.GetByEmailDomainAsync("gmail.com");
+    public async Task<List<User>> Dapper_WhereClause()
+    {
+        var result = await _dapper.GetByEmailDomainAsync("gmail.com");
+        return result.ToList();
+    }
 
     [Benchmark(Description = "WhereClause - EF Core")]
-    public async Task<IEnumerable<User>> EfCore_WhereClause()
-        => await _efcore.GetByEmailDomainAsync("gmail.com");
+    public async Task<List<User>> EfCore_WhereClause()
+    {
+        var result = await _efcore.GetByEmailDomainAsync("gmail.com");
+        return result.ToList();
+    }
 
     // Simple 3: SimplePaging
     [Benchmark(Description = "SimplePaging - NuVatis")]
-    public async Task<IEnumerable<User>> NuVatis_SimplePaging()
-        => await _nuvatis.GetPagedAsync(0, 10);
+    public async Task<List<User>> NuVatis_SimplePaging()
+    {
+        var result = await _nuvatis.GetPagedAsync(0, 10);
+        return result.ToList();
+    }
 
     [Benchmark(Description = "SimplePaging - Dapper")]
-    public async Task<IEnumerable<User>> Dapper_SimplePaging()
-        => await _dapper.GetPagedAsync(0, 10);
+    public async Task<List<User>> Dapper_SimplePaging()
+    {
+        var result = await _dapper.GetPagedAsync(0, 10);
+        return result.ToList();
+    }
 
     [Benchmark(Description = "SimplePaging - EF Core")]
-    public async Task<IEnumerable<User>> EfCore_SimplePaging()
-        => await _efcore.GetPagedAsync(0, 10);
+    public async Task<List<User>> EfCore_SimplePaging()
+    {
+        var result = await _efcore.GetPagedAsync(0, 10);
+        return result.ToList();
+    }
 
     // Simple 4: InsertSingle
     [Benchmark(Description = "InsertSingle - NuVatis")]
@@ -91,14 +109,18 @@ public class SimpleCrudBenchmarks
     public async Task<int> EfCore_UpdateSingle()
         => await _efcoreProd.UpdateStockAsync(12345, 100);
 
-    private User CreateDummyUser() => new()
+    private User CreateDummyUser()
     {
-        UserName     = "benchmark_user",
-        Email        = "benchmark@test.com",
-        FullName     = "Benchmark User",
-        PasswordHash = "hashed_password",
-        IsActive     = true,
-        CreatedAt    = DateTime.UtcNow,
-        UpdatedAt    = DateTime.UtcNow
-    };
+        var now = DateTime.SpecifyKind(DateTime.Now, DateTimeKind.Unspecified);
+        return new()
+        {
+            UserName     = "benchmark_user",
+            Email        = "benchmark@test.com",
+            FullName     = "Benchmark User",
+            PasswordHash = "hashed_password",
+            IsActive     = true,
+            CreatedAt    = now,
+            UpdatedAt    = now
+        };
+    }
 }

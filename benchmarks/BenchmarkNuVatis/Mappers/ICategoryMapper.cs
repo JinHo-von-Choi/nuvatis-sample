@@ -1,7 +1,9 @@
+using NuVatis.Attributes;
 using NuVatis.Benchmark.Core.Models;
 
-namespace NuVatis.Benchmark.NuVatis.Mappers;
+namespace BenchmarkNuVatis.Mappers;
 
+[NuVatisMapper]
 public interface ICategoryMapper
 {
     Task<Category?> GetByIdAsync(long id);

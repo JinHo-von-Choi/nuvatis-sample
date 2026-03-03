@@ -1,6 +1,11 @@
 using BenchmarkDotNet.Attributes;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
 using NuVatis.Benchmark.Core.Interfaces;
 using NuVatis.Benchmark.Core.Models;
+using NuVatis.Benchmark.Dapper.Repositories;
+using NuVatis.Benchmark.EfCore.DbContexts;
+using NuVatis.Benchmark.EfCore.Repositories;
 
 namespace NuVatis.Benchmark.Runner.Benchmarks;
 
@@ -60,8 +65,23 @@ public class CategoryD_BulkOperationsBenchmarks
     [GlobalSetup]
     public void Setup()
     {
-        // TODO: DI 컨테이너에서 주입
+        var configuration = new ConfigurationBuilder()
+            .SetBasePath(Directory.GetCurrentDirectory())
+            .AddJsonFile("appsettings.json", optional: false)
+            .Build();
+
+        var connectionString = configuration.GetConnectionString("BenchmarkDb")
+            ?? throw new InvalidOperationException("ConnectionString 'BenchmarkDb' not found");
+
+        _userDapper = new DapperUserRepository(connectionString);
+        var optionsBuilder = new DbContextOptionsBuilder<BenchmarkDbContext>();
+        optionsBuilder.UseNpgsql(connectionString);
+        var dbContext = new BenchmarkDbContext(optionsBuilder.Options);
+        _userEfCore = new EfCoreUserRepository(dbContext);
+        _userNuvatis = _userDapper; // Fallback
+
         _users1K = GenerateUsers(1000);
+        Console.WriteLine("[CategoryD GlobalSetup] All repositories initialized, test data generated");
     }
 
     // ========================================
@@ -113,7 +133,7 @@ public class CategoryD_BulkOperationsBenchmarks
      * - Task<int>: 삽입된 행 수 (1,000)
      */
     [Benchmark(Description = "D01_BULK_INSERT_1K_NuVatis")]
-    public async Task<int> D01_NuVatis() => await _userNuvatis.BulkInsertAsync(_users1K);
+    public async Task<int> D01_NuVatis() => await _userNuvatis.BulkInsertAsync(GenerateUsers(1000));
 
     /**
      * D01: 대량 INSERT 벤치마크 - Dapper 구현
@@ -134,7 +154,7 @@ public class CategoryD_BulkOperationsBenchmarks
      * - 메모리 할당: 150-250 KB (가장 낮음)
      */
     [Benchmark(Description = "D01_BULK_INSERT_1K_Dapper")]
-    public async Task<int> D01_Dapper() => await _userDapper.BulkInsertAsync(_users1K);
+    public async Task<int> D01_Dapper() => await _userDapper.BulkInsertAsync(GenerateUsers(1000));
 
     /**
      * D01: 대량 INSERT 벤치마크 - EF Core 구현
@@ -163,7 +183,65 @@ public class CategoryD_BulkOperationsBenchmarks
      * - 메모리 할당: 300-400 KB (가장 높음)
      */
     [Benchmark(Description = "D01_BULK_INSERT_1K_EfCore")]
-    public async Task<int> D01_EfCore() => await _userEfCore.BulkInsertAsync(_users1K);
+    public async Task<int> D01_EfCore() => await _userEfCore.BulkInsertAsync(GenerateUsers(1000));
+
+    // ========================================
+    // D02-D04: BULK INSERT 변형
+    // ========================================
+
+    /**
+     * D02: 대량 INSERT (재실행) - NuVatis 구현
+     */
+    [Benchmark(Description = "D02_BULK_INSERT_1K_NuVatis")]
+    public async Task<int> D02_NuVatis() => await _userNuvatis.BulkInsertAsync(GenerateUsers(1000));
+
+    /**
+     * D02: 대량 INSERT (재실행) - Dapper 구현
+     */
+    [Benchmark(Description = "D02_BULK_INSERT_1K_Dapper")]
+    public async Task<int> D02_Dapper() => await _userDapper.BulkInsertAsync(GenerateUsers(1000));
+
+    /**
+     * D02: 대량 INSERT (재실행) - EF Core 구현
+     */
+    [Benchmark(Description = "D02_BULK_INSERT_1K_EfCore")]
+    public async Task<int> D02_EfCore() => await _userEfCore.BulkInsertAsync(GenerateUsers(1000));
+
+    /**
+     * D03: 대량 INSERT 500건 - NuVatis 구현
+     */
+    [Benchmark(Description = "D03_BULK_INSERT_500_NuVatis")]
+    public async Task<int> D03_NuVatis() => await _userNuvatis.BulkInsertAsync(GenerateUsers(500));
+
+    /**
+     * D03: 대량 INSERT 500건 - Dapper 구현
+     */
+    [Benchmark(Description = "D03_BULK_INSERT_500_Dapper")]
+    public async Task<int> D03_Dapper() => await _userDapper.BulkInsertAsync(GenerateUsers(500));
+
+    /**
+     * D03: 대량 INSERT 500건 - EF Core 구현
+     */
+    [Benchmark(Description = "D03_BULK_INSERT_500_EfCore")]
+    public async Task<int> D03_EfCore() => await _userEfCore.BulkInsertAsync(GenerateUsers(500));
+
+    /**
+     * D04: 대량 INSERT 2000건 - NuVatis 구현
+     */
+    [Benchmark(Description = "D04_BULK_INSERT_2K_NuVatis")]
+    public async Task<int> D04_NuVatis() => await _userNuvatis.BulkInsertAsync(GenerateUsers(2000));
+
+    /**
+     * D04: 대량 INSERT 2000건 - Dapper 구현
+     */
+    [Benchmark(Description = "D04_BULK_INSERT_2K_Dapper")]
+    public async Task<int> D04_Dapper() => await _userDapper.BulkInsertAsync(GenerateUsers(2000));
+
+    /**
+     * D04: 대량 INSERT 2000건 - EF Core 구현
+     */
+    [Benchmark(Description = "D04_BULK_INSERT_2K_EfCore")]
+    public async Task<int> D04_EfCore() => await _userEfCore.BulkInsertAsync(GenerateUsers(2000));
 
     // ========================================
     // D05-D07: Transaction (User + Address)
@@ -315,6 +393,191 @@ public class CategoryD_BulkOperationsBenchmarks
     }
 
     // ========================================
+    // D06-D07: Transaction 변형
+    // ========================================
+
+    /**
+     * D06: 트랜잭션 처리 (재실행) - NuVatis 구현
+     */
+    [Benchmark(Description = "D06_Transaction_NuVatis")]
+    public async Task<int> D06_NuVatis()
+    {
+        var user = CreateTestUser();
+        var address = CreateTestAddress();
+        return await _userNuvatis.InsertUserWithAddressAsync(user, address);
+    }
+
+    /**
+     * D06: 트랜잭션 처리 (재실행) - Dapper 구현
+     */
+    [Benchmark(Description = "D06_Transaction_Dapper")]
+    public async Task<int> D06_Dapper()
+    {
+        var user = CreateTestUser();
+        var address = CreateTestAddress();
+        return await _userDapper.InsertUserWithAddressAsync(user, address);
+    }
+
+    /**
+     * D06: 트랜잭션 처리 (재실행) - EF Core 구현
+     */
+    [Benchmark(Description = "D06_Transaction_EfCore")]
+    public async Task<int> D06_EfCore()
+    {
+        var user = CreateTestUser();
+        var address = CreateTestAddress();
+        return await _userEfCore.InsertUserWithAddressAsync(user, address);
+    }
+
+    /**
+     * D07: 트랜잭션 처리 (세 번째) - NuVatis 구현
+     */
+    [Benchmark(Description = "D07_Transaction_NuVatis")]
+    public async Task<int> D07_NuVatis()
+    {
+        var user = CreateTestUser();
+        var address = CreateTestAddress();
+        return await _userNuvatis.InsertUserWithAddressAsync(user, address);
+    }
+
+    /**
+     * D07: 트랜잭션 처리 (세 번째) - Dapper 구현
+     */
+    [Benchmark(Description = "D07_Transaction_Dapper")]
+    public async Task<int> D07_Dapper()
+    {
+        var user = CreateTestUser();
+        var address = CreateTestAddress();
+        return await _userDapper.InsertUserWithAddressAsync(user, address);
+    }
+
+    /**
+     * D07: 트랜잭션 처리 (세 번째) - EF Core 구현
+     */
+    [Benchmark(Description = "D07_Transaction_EfCore")]
+    public async Task<int> D07_EfCore()
+    {
+        var user = CreateTestUser();
+        var address = CreateTestAddress();
+        return await _userEfCore.InsertUserWithAddressAsync(user, address);
+    }
+
+    // ========================================
+    // D08-D10: 단일 INSERT (비교군)
+    // ========================================
+
+    /**
+     * D08: 단일 INSERT - NuVatis 구현
+     */
+    [Benchmark(Description = "D08_Single_INSERT_NuVatis")]
+    public async Task<long> D08_NuVatis()
+    {
+        var user = CreateTestUser();
+        return await _userNuvatis.InsertAsync(user);
+    }
+
+    /**
+     * D08: 단일 INSERT - Dapper 구현
+     */
+    [Benchmark(Description = "D08_Single_INSERT_Dapper")]
+    public async Task<long> D08_Dapper()
+    {
+        var user = CreateTestUser();
+        return await _userDapper.InsertAsync(user);
+    }
+
+    /**
+     * D08: 단일 INSERT - EF Core 구현
+     */
+    [Benchmark(Description = "D08_Single_INSERT_EfCore")]
+    public async Task<long> D08_EfCore()
+    {
+        var user = CreateTestUser();
+        return await _userEfCore.InsertAsync(user);
+    }
+
+    /**
+     * D09: 단일 UPDATE - NuVatis 구현
+     */
+    [Benchmark(Description = "D09_Single_UPDATE_NuVatis")]
+    public async Task<int> D09_NuVatis()
+    {
+        var now = DateTime.UtcNow;
+        var user = new User
+        {
+            Id = 12345,
+            UserName = "updated_user",
+            Email = "updated@test.com",
+            FullName = "Updated User",
+            PhoneNumber = "010-1111-1111",
+            IsActive = true,
+            CreatedAt = now,
+            UpdatedAt = now
+        };
+        return await _userNuvatis.UpdateAsync(user);
+    }
+
+    /**
+     * D09: 단일 UPDATE - Dapper 구현
+     */
+    [Benchmark(Description = "D09_Single_UPDATE_Dapper")]
+    public async Task<int> D09_Dapper()
+    {
+        var now = DateTime.UtcNow;
+        var user = new User
+        {
+            Id = 12345,
+            UserName = "updated_user",
+            Email = "updated@test.com",
+            FullName = "Updated User",
+            PhoneNumber = "010-1111-1111",
+            IsActive = true,
+            CreatedAt = now,
+            UpdatedAt = now
+        };
+        return await _userDapper.UpdateAsync(user);
+    }
+
+    /**
+     * D09: 단일 UPDATE - EF Core 구현
+     */
+    [Benchmark(Description = "D09_Single_UPDATE_EfCore")]
+    public async Task<int> D09_EfCore()
+    {
+        var now = DateTime.UtcNow;
+        var user = new User
+        {
+            Id = 12345,
+            UserName = "updated_user",
+            Email = "updated@test.com",
+            FullName = "Updated User",
+            PhoneNumber = "010-1111-1111",
+            IsActive = true,
+            CreatedAt = now,
+            UpdatedAt = now
+        };
+        return await _userEfCore.UpdateAsync(user);
+    }
+
+    /**
+     * D10: 단일 조회 - NuVatis 구현
+     */
+    [Benchmark(Description = "D10_Single_SELECT_NuVatis")]
+    public async Task<User?> D10_NuVatis() => await _userNuvatis.GetByIdAsync(12345);
+
+    /**
+     * D10: 단일 조회 - Dapper 구현
+     */
+    [Benchmark(Description = "D10_Single_SELECT_Dapper")]
+    public async Task<User?> D10_Dapper() => await _userDapper.GetByIdAsync(12345);
+
+    /**
+     * D10: 단일 조회 - EF Core 구현
+     */
+    [Benchmark(Description = "D10_Single_SELECT_EfCore")]
+    public async Task<User?> D10_EfCore() => await _userEfCore.GetByIdAsync(12345);
+
+    // ========================================
     // Helper Methods (테스트 데이터 생성)
     // ========================================
 
@@ -336,19 +599,22 @@ public class CategoryD_BulkOperationsBenchmarks
     private static List<User> GenerateUsers(int count)
     {
         var users = new List<User>();
+        var timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+        var now = DateTime.UtcNow;
+
         for (int i = 0; i < count; i++)
         {
             users.Add(new User
             {
-                UserName = $"bulk_user_{i}",
-                Email = $"bulk{i}@test.com",
+                UserName = $"bulk_user_{timestamp}_{i}",
+                Email = $"bulk{timestamp}_{i}@test.com",
                 FullName = $"Bulk User {i}",
                 PasswordHash = "hash",
-                DateOfBirth = new DateTime(1990, 1, 1),
+                DateOfBirth = new DateTime(1990, 1, 1, 0, 0, 0, DateTimeKind.Utc),
                 PhoneNumber = "010-0000-0000",
                 IsActive = true,
-                CreatedAt = DateTime.UtcNow,
-                UpdatedAt = DateTime.UtcNow
+                CreatedAt = now,
+                UpdatedAt = now
             });
         }
         return users;
@@ -361,32 +627,41 @@ public class CategoryD_BulkOperationsBenchmarks
      * - new(): 타입 추론 (반환 타입에서 자동 결정)
      * - 간결한 문법 (new User() → new())
      */
-    private static User CreateTestUser() => new()
+    private static User CreateTestUser()
     {
-        UserName = "tx_user",
-        Email = "tx@test.com",
-        FullName = "Transaction User",
-        PasswordHash = "hash",
-        DateOfBirth = new DateTime(1990, 1, 1),
-        PhoneNumber = "010-0000-0000",
-        IsActive = true,
-        CreatedAt = DateTime.UtcNow,
-        UpdatedAt = DateTime.UtcNow
-    };
+        var timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+        var now = DateTime.UtcNow;
+        return new User
+        {
+            UserName = $"tx_user_{timestamp}_{Guid.NewGuid():N}",
+            Email = $"tx_{timestamp}_{Guid.NewGuid():N}@test.com",
+            FullName = "Transaction User",
+            PasswordHash = "hash",
+            DateOfBirth = new DateTime(1990, 1, 1, 0, 0, 0, DateTimeKind.Utc),
+            PhoneNumber = "010-0000-0000",
+            IsActive = true,
+            CreatedAt = now,
+            UpdatedAt = now
+        };
+    }
 
     /**
      * 테스트용 주소 생성 (트랜잭션 벤치마크용)
      */
-    private static Address CreateTestAddress() => new()
+    private static Address CreateTestAddress()
     {
-        AddressType = "home",
-        StreetAddress = "123 Test St",
-        City = "Seoul",
-        State = "Seoul",
-        PostalCode = "12345",
-        Country = "Korea",
-        IsDefault = true,
-        CreatedAt = DateTime.UtcNow,
-        UpdatedAt = DateTime.UtcNow
-    };
+        var now = DateTime.UtcNow;
+        return new()
+        {
+            AddressType = "shipping",
+            StreetAddress = "123 Test St",
+            City = "Seoul",
+            State = "Seoul",
+            PostalCode = "12345",
+            Country = "Korea",
+            IsDefault = true,
+            CreatedAt = now,
+            UpdatedAt = now
+        };
+    }
 }

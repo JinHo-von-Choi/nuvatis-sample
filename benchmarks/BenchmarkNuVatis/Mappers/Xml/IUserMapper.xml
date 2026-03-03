@@ -4,7 +4,7 @@
   작성자: 최진호
   작성일: 2026-03-01
 -->
-<mapper namespace="NuVatis.Benchmark.NuVatis.Mappers.IUserMapper">
+<mapper namespace="BenchmarkNuVatis.Mappers.IUserMapper">
 
   <!-- ResultMap 정의 -->
   <resultMap id="UserResult" type="NuVatis.Benchmark.Core.Models.User">
@@ -100,7 +100,7 @@
   </select>
 
   <!-- Medium: GroupByAggregate (국가별 사용자 수) -->
-  <select id="GetUserCountByCountryAsync" resultType="System.Collections.Generic.Dictionary`2[[System.String, System.Private.CoreLib],[System.Int32, System.Private.CoreLib]]">
+  <select id="GetUserCountByCountryAsync" resultType="dynamic">
     SELECT a.country AS Key, COUNT(DISTINCT u.id) AS Value
     FROM users u
     INNER JOIN addresses a ON u.id = a.user_id

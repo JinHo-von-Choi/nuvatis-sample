@@ -18,14 +18,15 @@ public class DapperReviewRepository : IReviewRepository
     {
         await using var conn = new NpgsqlConnection(_connectionString);
         return await conn.QuerySingleOrDefaultAsync<Review>(
-            "SELECT * FROM reviews WHERE id = @Id", new { Id = id });
+            "SELECT id, user_id AS UserId, product_id AS ProductId, rating, comment AS Content, created_at AS CreatedAt FROM reviews WHERE id = @Id",
+            new { Id = id });
     }
 
     public async Task<IEnumerable<Review>> GetByProductIdAsync(long productId)
     {
         await using var conn = new NpgsqlConnection(_connectionString);
         return await conn.QueryAsync<Review>(
-            "SELECT * FROM reviews WHERE product_id = @ProductId ORDER BY created_at DESC LIMIT 100",
+            "SELECT id, user_id AS UserId, product_id AS ProductId, rating, comment AS Content, created_at AS CreatedAt FROM reviews WHERE product_id = @ProductId ORDER BY created_at DESC LIMIT 100",
             new { ProductId = productId });
     }
 
@@ -33,7 +34,7 @@ public class DapperReviewRepository : IReviewRepository
     {
         await using var conn = new NpgsqlConnection(_connectionString);
         const string sql = @"
-            SELECT r.*
+            SELECT r.id, r.user_id AS UserId, r.product_id AS ProductId, r.rating, r.comment AS Content, r.created_at AS CreatedAt
             FROM reviews r
             INNER JOIN users u ON r.user_id = u.id
             INNER JOIN products p ON r.product_id = p.id
@@ -64,12 +65,11 @@ public class DapperReviewRepository : IReviewRepository
         const string sql = @"
             WITH ranked_reviews AS (
                 SELECT
-                    id, product_id, user_id, rating, helpful_count,
-                    ROW_NUMBER() OVER (PARTITION BY product_id ORDER BY helpful_count DESC, created_at DESC) AS rank
+                    id, product_id, user_id, rating,
+                    ROW_NUMBER() OVER (PARTITION BY product_id ORDER BY rating DESC, created_at DESC) AS rank
                 FROM reviews
-                WHERE is_verified = true
             )
-            SELECT product_id, user_id, rating, helpful_count, rank
+            SELECT product_id, user_id, rating, rank
             FROM ranked_reviews
             WHERE rank <= @TopN
             ORDER BY product_id, rank";
@@ -81,8 +81,8 @@ public class DapperReviewRepository : IReviewRepository
     {
         await using var conn = new NpgsqlConnection(_connectionString);
         const string sql = @"
-            INSERT INTO reviews (user_id, product_id, rating, title, content, is_verified, helpful_count, created_at, updated_at)
-            VALUES (@UserId, @ProductId, @Rating, @Title, @Content, @IsVerified, @HelpfulCount, @CreatedAt, @UpdatedAt)
+            INSERT INTO reviews (user_id, product_id, rating, comment, created_at)
+            VALUES (@UserId, @ProductId, @Rating, @Content, @CreatedAt)
             RETURNING id";
 
         return await conn.ExecuteScalarAsync<long>(sql, review);
@@ -94,7 +94,7 @@ public class DapperReviewRepository : IReviewRepository
         await conn.OpenAsync();
 
         await using var writer = conn.BeginBinaryImport(
-            "COPY reviews (user_id, product_id, rating, title, content, is_verified, helpful_count, created_at, updated_at) FROM STDIN BINARY");
+            "COPY reviews (user_id, product_id, rating, comment, created_at) FROM STDIN BINARY");
 
         foreach (var review in reviews)
         {
@@ -102,12 +102,8 @@ public class DapperReviewRepository : IReviewRepository
             await writer.WriteAsync(review.UserId);
             await writer.WriteAsync(review.ProductId);
             await writer.WriteAsync(review.Rating);
-            await writer.WriteAsync(review.Title);
-            await writer.WriteAsync(review.Content);
-            await writer.WriteAsync(review.IsVerified);
-            await writer.WriteAsync(review.HelpfulCount);
+            await writer.WriteAsync(review.Content); // DB: comment
             await writer.WriteAsync(review.CreatedAt, NpgsqlTypes.NpgsqlDbType.Timestamp);
-            await writer.WriteAsync(review.UpdatedAt, NpgsqlTypes.NpgsqlDbType.Timestamp);
         }
 
         var rows = await writer.CompleteAsync();

@@ -5,11 +5,12 @@
     <TargetFramework>net8.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
   </PropertyGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\NuVatis.Benchmark.Core\NuVatis.Benchmark.Core.csproj" />
-    <ProjectReference Include="..\NuVatis.Benchmark.NuVatis\NuVatis.Benchmark.NuVatis.csproj" />
+    <ProjectReference Include="..\BenchmarkNuVatis\BenchmarkNuVatis.csproj" />
     <ProjectReference Include="..\NuVatis.Benchmark.Dapper\NuVatis.Benchmark.Dapper.csproj" />
     <ProjectReference Include="..\NuVatis.Benchmark.EfCore\NuVatis.Benchmark.EfCore.csproj" />
   </ItemGroup>
@@ -24,6 +25,12 @@
       <PrivateAssets>all</PrivateAssets>
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
     </PackageReference>
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Update="appsettings.json">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
   </ItemGroup>
 
 </Project>

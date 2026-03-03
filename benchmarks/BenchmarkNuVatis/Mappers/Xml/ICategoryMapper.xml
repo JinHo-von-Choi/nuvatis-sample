@@ -4,23 +4,20 @@
   작성자: 최진호
   작성일: 2026-03-01
 -->
-<mapper namespace="NuVatis.Benchmark.NuVatis.Mappers.ICategoryMapper">
+<mapper namespace="BenchmarkNuVatis.Mappers.ICategoryMapper">
 
   <!-- ResultMap 정의 -->
   <resultMap id="CategoryResult" type="NuVatis.Benchmark.Core.Models.Category">
     <id column="id" property="Id" />
     <result column="parent_id" property="ParentId" />
-    <result column="category_name" property="CategoryName" />
+    <result column="name" property="CategoryName" />
     <result column="description" property="Description" />
-    <result column="display_order" property="DisplayOrder" />
-    <result column="is_active" property="IsActive" />
     <result column="created_at" property="CreatedAt" />
-    <result column="updated_at" property="UpdatedAt" />
   </resultMap>
 
   <!-- Simple: GetById -->
   <select id="GetByIdAsync" resultMap="CategoryResult">
-    SELECT id, parent_id, category_name, description, display_order, is_active, created_at, updated_at
+    SELECT id, parent_id, name, description, created_at
     FROM categories
     WHERE id = #{id}
   </select>
@@ -29,47 +26,46 @@
   <select id="GetCategoryTreeAsync" resultMap="CategoryResult">
     WITH RECURSIVE category_tree AS (
       -- 루트 카테고리
-      SELECT id, parent_id, category_name, description, display_order, is_active, created_at, updated_at, 1 AS level
+      SELECT id, parent_id, name, description, created_at, 1 AS level
       FROM categories
       WHERE id = #{rootId}
 
       UNION ALL
 
       -- 자식 카테고리
-      SELECT c.id, c.parent_id, c.category_name, c.description, c.display_order, c.is_active, c.created_at, c.updated_at, ct.level + 1
+      SELECT c.id, c.parent_id, c.name, c.description, c.created_at, ct.level + 1
       FROM categories c
       INNER JOIN category_tree ct ON c.parent_id = ct.id
-      WHERE c.is_active = true
     )
-    SELECT id, parent_id, category_name, description, display_order, is_active, created_at, updated_at
+    SELECT id, parent_id, name, description, created_at
     FROM category_tree
-    ORDER BY level, display_order
+    ORDER BY level, id
   </select>
 
   <!-- Complex: RecursiveCTE (모든 자식 카테고리) -->
   <select id="GetAllDescendantsAsync" resultMap="CategoryResult">
     WITH RECURSIVE descendants AS (
       -- 시작 카테고리
-      SELECT id, parent_id, category_name, description, display_order, is_active, created_at, updated_at
+      SELECT id, parent_id, name, description, created_at
       FROM categories
       WHERE parent_id = #{parentId}
 
       UNION ALL
 
       -- 재귀적으로 자식 조회
-      SELECT c.id, c.parent_id, c.category_name, c.description, c.display_order, c.is_active, c.created_at, c.updated_at
+      SELECT c.id, c.parent_id, c.name, c.description, c.created_at
       FROM categories c
       INNER JOIN descendants d ON c.parent_id = d.id
     )
-    SELECT id, parent_id, category_name, description, display_order, is_active, created_at, updated_at
+    SELECT id, parent_id, name, description, created_at
     FROM descendants
-    ORDER BY display_order
+    ORDER BY id
   </select>
 
   <!-- Simple: InsertSingle -->
   <insert id="InsertAsync">
-    INSERT INTO categories (parent_id, category_name, description, display_order, is_active, created_at, updated_at)
-    VALUES (#{ParentId}, #{CategoryName}, #{Description}, #{DisplayOrder}, #{IsActive}, #{CreatedAt}, #{UpdatedAt})
+    INSERT INTO categories (parent_id, name, description, created_at)
+    VALUES (#{ParentId}, #{CategoryName}, #{Description}, #{CreatedAt})
     RETURNING id
   </insert>
 

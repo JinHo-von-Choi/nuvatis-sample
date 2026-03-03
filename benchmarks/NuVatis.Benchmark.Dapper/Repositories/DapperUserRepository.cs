@@ -196,8 +196,8 @@ public class DapperUserRepository : IUserRepository
             await writer.WriteAsync(user.DateOfBirth, NpgsqlTypes.NpgsqlDbType.Date);
             await writer.WriteAsync(user.PhoneNumber);
             await writer.WriteAsync(user.IsActive);
-            await writer.WriteAsync(user.CreatedAt, NpgsqlTypes.NpgsqlDbType.Timestamp);
-            await writer.WriteAsync(user.UpdatedAt, NpgsqlTypes.NpgsqlDbType.Timestamp);
+            await writer.WriteAsync(DateTime.SpecifyKind(user.CreatedAt, DateTimeKind.Unspecified), NpgsqlTypes.NpgsqlDbType.Timestamp);
+            await writer.WriteAsync(DateTime.SpecifyKind(user.UpdatedAt, DateTimeKind.Unspecified), NpgsqlTypes.NpgsqlDbType.Timestamp);
         }
 
         var rows = await writer.CompleteAsync();

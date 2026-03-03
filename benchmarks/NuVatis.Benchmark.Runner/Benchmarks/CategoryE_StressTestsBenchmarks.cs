@@ -1,6 +1,11 @@
 using BenchmarkDotNet.Attributes;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
 using NuVatis.Benchmark.Core.Interfaces;
 using NuVatis.Benchmark.Core.Models;
+using NuVatis.Benchmark.Dapper.Repositories;
+using NuVatis.Benchmark.EfCore.DbContexts;
+using NuVatis.Benchmark.EfCore.Repositories;
 
 namespace NuVatis.Benchmark.Runner.Benchmarks;
 
@@ -37,16 +42,32 @@ public class CategoryE_StressTestsBenchmarks
 {
     private IUserRepository _userNuvatis = null!;
     private IUserRepository _userDapper = null!;
-    private IUserRepository _userEfCore = null!;
+    // EfCore는 동시성 문제로 인해 각 메서드에서 별도 생성
 
     private IOrderRepository _orderNuvatis = null!;
     private IOrderRepository _orderDapper = null!;
-    private IOrderRepository _orderEfCore = null!;
+    // EfCore는 동시성 문제로 인해 각 메서드에서 별도 생성
+
+    private string _connectionString = null!;
 
     [GlobalSetup]
     public void Setup()
     {
-        // TODO: DI 컨테이너에서 주입
+        var configuration = new ConfigurationBuilder()
+            .SetBasePath(Directory.GetCurrentDirectory())
+            .AddJsonFile("appsettings.json", optional: false)
+            .Build();
+
+        _connectionString = configuration.GetConnectionString("BenchmarkDb")
+            ?? throw new InvalidOperationException("ConnectionString 'BenchmarkDb' not found");
+
+        _userDapper = new DapperUserRepository(_connectionString);
+        _userNuvatis = _userDapper; // Fallback
+
+        _orderDapper = new DapperOrderRepository(_connectionString);
+        _orderNuvatis = _orderDapper; // Fallback
+
+        Console.WriteLine("[CategoryE GlobalSetup] All repositories initialized");
     }
 
     // ========================================
@@ -93,8 +114,11 @@ public class CategoryE_StressTestsBenchmarks
      * - 버퍼링 최소화
      */
     [Benchmark(Description = "E01_Query_10K_Rows_NuVatis")]
-    public async Task<IEnumerable<User>> E01_NuVatis() =>
-        await _userNuvatis.GetPagedAsync(0, 10000);
+    public async Task<List<User>> E01_NuVatis()
+    {
+        var result = await _userNuvatis.GetPagedAsync(0, 10000);
+        return result.ToList();
+    }
 
     /**
      * E01: 대량 데이터 조회 벤치마크 - Dapper 구현
@@ -118,8 +142,11 @@ public class CategoryE_StressTestsBenchmarks
      * - 메모리 할당: 1-1.5 MB (가장 낮음)
      */
     [Benchmark(Description = "E01_Query_10K_Rows_Dapper")]
-    public async Task<IEnumerable<User>> E01_Dapper() =>
-        await _userDapper.GetPagedAsync(0, 10000);
+    public async Task<List<User>> E01_Dapper()
+    {
+        var result = await _userDapper.GetPagedAsync(0, 10000);
+        return result.ToList();
+    }
 
     /**
      * E01: 대량 데이터 조회 벤치마크 - EF Core 구현
@@ -149,8 +176,16 @@ public class CategoryE_StressTestsBenchmarks
      * - 메모리 할당: 1.5-2 MB
      */
     [Benchmark(Description = "E01_Query_10K_Rows_EfCore")]
-    public async Task<IEnumerable<User>> E01_EfCore() =>
-        await _userEfCore.GetPagedAsync(0, 10000);
+    public async Task<List<User>> E01_EfCore()
+    {
+        var optionsBuilder = new DbContextOptionsBuilder<BenchmarkDbContext>();
+        optionsBuilder.UseNpgsql(_connectionString);
+        await using var context = new BenchmarkDbContext(optionsBuilder.Options);
+
+        var repository = new EfCoreUserRepository(context);
+        var result = await repository.GetPagedAsync(0, 10000);
+        return result.ToList();
+    }
 
     // ========================================
     // E02: 복잡 쿼리 100회 반복
@@ -224,13 +259,22 @@ public class CategoryE_StressTestsBenchmarks
      * 【 예상 성능 】
      * - 응답 시간: 800ms-2s
      * - 메모리 할당: 400-600 KB (Change Tracking 비용)
+     *
+     * 【 수정 사항 】
+     * - AsNoTracking이 이미 Repository에 적용되어 있어 Change Tracking 누적 문제 없음
+     * - 순차 실행이므로 단일 DbContext 사용 가능
      */
     [Benchmark(Description = "E02_Complex_Query_100x_EfCore")]
     public async Task E02_EfCore()
     {
+        var optionsBuilder = new DbContextOptionsBuilder<BenchmarkDbContext>();
+        optionsBuilder.UseNpgsql(_connectionString);
+        await using var context = new BenchmarkDbContext(optionsBuilder.Options);
+
+        var repository = new EfCoreOrderRepository(context);
         for (int i = 0; i < 100; i++)
         {
-            await _orderEfCore.GetWithUserAndItemsAsync(100001 + i);
+            await repository.GetWithUserAndItemsAsync(100001 + i);
         }
     }
 
@@ -370,7 +414,111 @@ public class CategoryE_StressTestsBenchmarks
         for (int i = 0; i < 50; i++)
         {
             int userId = 12345 + i;
-            tasks.Add(Task.Run(async () => await _userEfCore.GetByIdAsync(userId)));
+            tasks.Add(Task.Run(async () =>
+            {
+                var optionsBuilder = new DbContextOptionsBuilder<BenchmarkDbContext>();
+                optionsBuilder.UseNpgsql(_connectionString);
+                await using var context = new BenchmarkDbContext(optionsBuilder.Options);
+
+                var repository = new EfCoreUserRepository(context);
+                await repository.GetByIdAsync(userId);
+            }));
+        }
+        await Task.WhenAll(tasks);
+    }
+
+    // ========================================
+    // E04-E05: 추가 스트레스 테스트
+    // ========================================
+
+    /**
+     * E04: 대량 조회 5000건 - NuVatis 구현
+     */
+    [Benchmark(Description = "E04_Query_5K_Rows_NuVatis")]
+    public async Task<List<User>> E04_NuVatis()
+    {
+        var result = await _userNuvatis.GetPagedAsync(0, 5000);
+        return result.ToList();
+    }
+
+    /**
+     * E04: 대량 조회 5000건 - Dapper 구현
+     */
+    [Benchmark(Description = "E04_Query_5K_Rows_Dapper")]
+    public async Task<List<User>> E04_Dapper()
+    {
+        var result = await _userDapper.GetPagedAsync(0, 5000);
+        return result.ToList();
+    }
+
+    /**
+     * E04: 대량 조회 5000건 - EF Core 구현
+     */
+    [Benchmark(Description = "E04_Query_5K_Rows_EfCore")]
+    public async Task<List<User>> E04_EfCore()
+    {
+        var optionsBuilder = new DbContextOptionsBuilder<BenchmarkDbContext>();
+        optionsBuilder.UseNpgsql(_connectionString);
+        await using var context = new BenchmarkDbContext(optionsBuilder.Options);
+
+        var repository = new EfCoreUserRepository(context);
+        var result = await repository.GetPagedAsync(0, 5000);
+        return result.ToList();
+    }
+
+    /**
+     * E05: 동시성 100 작업 - NuVatis 구현
+     */
+    [Benchmark(Description = "E05_Concurrency_100_NuVatis")]
+    public async Task E05_NuVatis()
+    {
+        var tasks = new List<Task>();
+        for (int i = 0; i < 100; i++)
+        {
+            int userId = 12345 + i;
+            tasks.Add(Task.Run(async () => await _userNuvatis.GetByIdAsync(userId)));
+        }
+        await Task.WhenAll(tasks);
+    }
+
+    /**
+     * E05: 동시성 100 작업 - Dapper 구현
+     */
+    [Benchmark(Description = "E05_Concurrency_100_Dapper")]
+    public async Task E05_Dapper()
+    {
+        var tasks = new List<Task>();
+        for (int i = 0; i < 100; i++)
+        {
+            int userId = 12345 + i;
+            tasks.Add(Task.Run(async () => await _userDapper.GetByIdAsync(userId)));
+        }
+        await Task.WhenAll(tasks);
+    }
+
+    /**
+     * E05: 동시성 100 작업 - EF Core 구현
+     *
+     * 【 수정 사항 】
+     * - 각 Task마다 별도 DbContext 생성하여 Thread-Safety 보장
+     * - EF Core는 Thread-Safe하지 않으므로 동시성 환경에서 필수
+     */
+    [Benchmark(Description = "E05_Concurrency_100_EfCore")]
+    public async Task E05_EfCore()
+    {
+        var tasks = new List<Task>();
+        for (int i = 0; i < 100; i++)
+        {
+            int userId = 12345 + i;
+            tasks.Add(Task.Run(async () =>
+            {
+                var optionsBuilder = new DbContextOptionsBuilder<BenchmarkDbContext>();
+                optionsBuilder.UseNpgsql(_connectionString);
+                await using var context = new BenchmarkDbContext(optionsBuilder.Options);
+
+                var repository = new EfCoreUserRepository(context);
+                await repository.GetByIdAsync(userId);
+            }));
         }
         await Task.WhenAll(tasks);
     }

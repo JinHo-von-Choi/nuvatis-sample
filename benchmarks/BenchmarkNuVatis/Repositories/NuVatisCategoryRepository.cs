@@ -1,8 +1,8 @@
 using NuVatis.Benchmark.Core.Interfaces;
 using NuVatis.Benchmark.Core.Models;
-using NuVatis.Benchmark.NuVatis.Mappers;
+using BenchmarkNuVatis.Mappers;
 
-namespace NuVatis.Benchmark.NuVatis.Repositories;
+namespace BenchmarkNuVatis.Repositories;
 
 public class NuVatisCategoryRepository : ICategoryRepository
 {

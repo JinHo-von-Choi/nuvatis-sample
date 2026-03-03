@@ -1,0 +1,22 @@
+# Build results
+bin/
+obj/
+BenchmarkDotNet.Artifacts/
+
+# User-specific files
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+
+# Sensitive configuration
+appsettings.json
+appsettings.*.json
+!appsettings.example.json
+
+# Environment files
+.env
+.env.local
+
+# Logs
+*.log

@@ -4,7 +4,7 @@
   작성자: 최진호
   작성일: 2026-03-01
 -->
-<mapper namespace="NuVatis.Benchmark.NuVatis.Mappers.IOrderMapper">
+<mapper namespace="BenchmarkNuVatis.Mappers.IOrderMapper">
 
   <!-- ResultMap 정의 -->
   <resultMap id="OrderResult" type="NuVatis.Benchmark.Core.Models.Order">

@@ -1,16 +1,32 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import OverviewDashboard from './components/OverviewDashboard';
 import CategoryDetail from './components/CategoryDetail';
 import ScenarioComparison from './components/ScenarioComparison';
 import ResourceAnalysis from './components/ResourceAnalysis';
 import PerformanceMetrics from './components/PerformanceMetrics';
 import { mockBenchmarkData } from './data/mockData';
+import { loadBenchmarkResults } from './utils/benchmarkParser';
+import { BenchmarkResult } from './types';
 
 type View = 'overview' | 'category' | 'scenario' | 'resource' | 'metrics';
 
 function App() {
   const [currentView, setCurrentView] = useState<View>('overview');
   const [selectedCategory, setSelectedCategory] = useState<string>('A');
+  const [benchmarkData, setBenchmarkData] = useState<BenchmarkResult[]>(mockBenchmarkData);
+  const [isLoading, setIsLoading] = useState(true);
+
+  useEffect(() => {
+    loadBenchmarkResults().then(data => {
+      if (data.length > 0) {
+        setBenchmarkData(data);
+        console.log('✅ 실제 벤치마크 데이터 로딩 완료:', data.length, '개');
+      } else {
+        console.log('⚠️ Mock 데이터 사용 중');
+      }
+      setIsLoading(false);
+    });
+  }, []);
 
   return (
     <div className="min-h-screen bg-slate-900 text-slate-100">
@@ -67,17 +83,28 @@ function App() {
 
       {/* Main Content */}
       <main className="container mx-auto px-6 py-8">
-        {currentView === 'overview' && <OverviewDashboard data={mockBenchmarkData} />}
-        {currentView === 'category' && (
-          <CategoryDetail
-            category={selectedCategory}
-            data={mockBenchmarkData}
-            onCategoryChange={setSelectedCategory}
-          />
+        {isLoading ? (
+          <div className="flex items-center justify-center h-64">
+            <div className="text-center">
+              <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-indigo-500 mx-auto"></div>
+              <p className="mt-4 text-slate-400">벤치마크 데이터 로딩 중...</p>
+            </div>
+          </div>
+        ) : (
+          <>
+            {currentView === 'overview' && <OverviewDashboard data={benchmarkData} />}
+            {currentView === 'category' && (
+              <CategoryDetail
+                category={selectedCategory}
+                data={benchmarkData}
+                onCategoryChange={setSelectedCategory}
+              />
+            )}
+            {currentView === 'scenario' && <ScenarioComparison data={benchmarkData} />}
+            {currentView === 'resource' && <ResourceAnalysis data={benchmarkData} />}
+            {currentView === 'metrics' && <PerformanceMetrics data={benchmarkData} />}
+          </>
         )}
-        {currentView === 'scenario' && <ScenarioComparison data={mockBenchmarkData} />}
-        {currentView === 'resource' && <ResourceAnalysis data={mockBenchmarkData} />}
-        {currentView === 'metrics' && <PerformanceMetrics data={mockBenchmarkData} />}
       </main>
 
       {/* Footer */}

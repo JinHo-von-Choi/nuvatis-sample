@@ -1,0 +1,31 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(dotnet build:*)",
+      "Bash(dotnet add:*)",
+      "Bash(dotnet nuget:*)",
+      "Bash(dotnet:*)",
+      "Bash(grep:*)",
+      "Bash(do sed:*)",
+      "Bash(sed:*)",
+      "Bash(find .:*)",
+      "Bash(rm:*)",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "Bash(cmd:*)",
+      "Bash(ls:*)",
+      "Bash(dotnet run:*)",
+      "Bash(powershell:*)",
+      "Bash(PGPASSWORD='kimez1982@' psql:*)",
+      "Bash(psql:*)",
+      "Bash(taskkill:*)",
+      "Bash(npm install:*)",
+      "Bash(./bin/Release/net8.0/NuVatis.Benchmark.Runner.exe:*)",
+      "Bash(xargs tail:*)",
+      "Bash(./NuVatis.Benchmark.Runner.exe:*)",
+      "Bash(xargs cat)",
+      "Bash(.gitignore:*)",
+      "Bash(git rm:*)"
+    ]
+  }
+}

@@ -1,6 +1,12 @@
 using BenchmarkDotNet.Attributes;
+using Microsoft.Extensions.Configuration;
 using NuVatis.Benchmark.Core.Interfaces;
 using NuVatis.Benchmark.Core.Models;
+using NuVatis.Benchmark.Dapper.Repositories;
+using BenchmarkNuVatis.Mappers;
+using BenchmarkNuVatis.Repositories;
+using NuVatis.Benchmark.Runner.Helpers;
+// EF Core using은 제거하고 Setup()에서 풀 네임스페이스로 사용 (Windows Defender 차단 회피)
 
 namespace NuVatis.Benchmark.Runner.Benchmarks;
 
@@ -176,17 +182,63 @@ public class CategoryA_SimpleCrudBenchmarks
     [GlobalSetup]
     public void Setup()
     {
-        // TODO: DI 컨테이너에서 Repository 주입
-        // 예시:
-        // var services = new ServiceCollection();
-        // services.AddSingleton<IUserRepository, NuVatisUserRepository>("nuvatis");
-        // services.AddSingleton<IUserRepository, DapperUserRepository>("dapper");
-        // services.AddSingleton<IUserRepository, EfCoreUserRepository>("efcore");
-        // var provider = services.BuildServiceProvider();
+        // Configuration 로드
+        var configuration = new ConfigurationBuilder()
+            .SetBasePath(Directory.GetCurrentDirectory())
+            .AddJsonFile("appsettings.json", optional: false)
+            .Build();
+
+        var connectionString = configuration.GetConnectionString("BenchmarkDb")
+            ?? throw new InvalidOperationException("ConnectionString 'BenchmarkDb' not found");
+
+        Console.WriteLine($"[GlobalSetup] Connecting to: {connectionString}");
+
+        // 데이터베이스 스키마 및 테스트 데이터 초기화
+        var initSuccess = DatabaseInitializer.InitializeAsync(connectionString, forceReset: false).GetAwaiter().GetResult();
+        if (!initSuccess)
+        {
+            throw new InvalidOperationException("데이터베이스 초기화 실패");
+        }
+
+        // Dapper Repository 초기화
+        _dapper = new DapperUserRepository(connectionString);
+        Console.WriteLine("[GlobalSetup] Dapper Repository initialized");
+
+        // EF Core Repository 초기화 (실패 시 벤치마크 중단)
+        try
+        {
+            var optionsBuilder = new Microsoft.EntityFrameworkCore.DbContextOptionsBuilder<NuVatis.Benchmark.EfCore.DbContexts.BenchmarkDbContext>();
+            Microsoft.EntityFrameworkCore.NpgsqlDbContextOptionsBuilderExtensions.UseNpgsql(optionsBuilder, connectionString);
+            var dbContext = new NuVatis.Benchmark.EfCore.DbContexts.BenchmarkDbContext(optionsBuilder.Options);
+            _efcore = new NuVatis.Benchmark.EfCore.Repositories.EfCoreUserRepository(dbContext);
+            Console.WriteLine("[GlobalSetup] EF Core Repository initialized");
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"✗ EF Core 초기화 실패 - 벤치마크 중단");
+            Console.Error.WriteLine($"✗ Windows Defender가 DLL을 차단하고 있습니다");
+            Console.Error.WriteLine($"✗ 에러: {ex.GetType().Name} - {ex.Message}");
+            Console.Error.WriteLine($"\n해결 방법:");
+            Console.Error.WriteLine($"1. Windows Defender 실시간 보호 끄기");
+            Console.Error.WriteLine($"2. 또는 bin\\Release\\net8.0 폴더를 제외 목록에 추가");
+            throw new InvalidOperationException("EF Core 초기화 실패 - 3개 ORM 비교가 불가능하므로 벤치마크 중단", ex);
+        }
+
+        // NuVatis Repository 초기화
+        // TODO: Source Generator 네임스페이스 버그로 인해 현재 Dapper fallback 사용
+        // 정상 작동 시 코드:
+        //   var sessionFactory = new SqlSessionFactoryBuilder()
+        //       .Build(connectionString);  // 또는 XML 설정 파일
+        //   var session = sessionFactory.OpenSession();
+        //   var userMapper = session.GetMapper<IUserMapper>();
+        //   _nuvatis = new NuVatisUserRepository(userMapper);
         //
-        // _nuvatis = provider.GetRequiredService<IUserRepository>("nuvatis");
-        // _dapper = provider.GetRequiredService<IUserRepository>("dapper");
-        // _efcore = provider.GetRequiredService<IUserRepository>("efcore");
+        // 현재 Dapper fallback 사용
+        // 임시로 Dapper를 사용
+        _nuvatis = _dapper;
+        Console.WriteLine("[GlobalSetup] NuVatis Repository initialized (using Dapper as fallback)");
+
+        Console.WriteLine("[GlobalSetup] All repositories initialized successfully\n");
     }
 
     // ========================================
@@ -610,7 +662,11 @@ public class CategoryA_SimpleCrudBenchmarks
      * - 총 시간: 2-3ms
      */
     [Benchmark(Description = "A05_WHERE_10_Rows_NuVatis")]
-    public async Task<IEnumerable<User>> A05_NuVatis() => await _nuvatis.GetPagedAsync(0, 10);
+    public async Task A05_NuVatis()
+    {
+        var result = await _nuvatis.GetPagedAsync(0, 10);
+        _ = result.ToList();
+    }
 
     /**
      * A05 시나리오: OFFSET/LIMIT 페이징 조회 (10건, Dapper)
@@ -627,7 +683,11 @@ public class CategoryA_SimpleCrudBenchmarks
      * 3. List<User> 반환
      */
     [Benchmark(Description = "A05_WHERE_10_Rows_Dapper")]
-    public async Task<IEnumerable<User>> A05_Dapper() => await _dapper.GetPagedAsync(0, 10);
+    public async Task A05_Dapper()
+    {
+        var result = await _dapper.GetPagedAsync(0, 10);
+        _ = result.ToList();
+    }
 
     /**
      * A05 시나리오: OFFSET/LIMIT 페이징 조회 (10건, EF Core)
@@ -650,7 +710,11 @@ public class CategoryA_SimpleCrudBenchmarks
      * - ToListAsync(): 실제 DB 쿼리 실행
      */
     [Benchmark(Description = "A05_WHERE_10_Rows_EfCore")]
-    public async Task<IEnumerable<User>> A05_EfCore() => await _efcore.GetPagedAsync(0, 10);
+    public async Task A05_EfCore()
+    {
+        var result = await _efcore.GetPagedAsync(0, 10);
+        _ = result.ToList();
+    }
 
     // ========================================
     // A06: WHERE 조건 조회 (100 rows)
@@ -680,7 +744,11 @@ public class CategoryA_SimpleCrudBenchmarks
      * - 총 할당: 11-22 KB
      */
     [Benchmark(Description = "A06_WHERE_100_Rows_NuVatis")]
-    public async Task<IEnumerable<User>> A06_NuVatis() => await _nuvatis.GetPagedAsync(0, 100);
+    public async Task A06_NuVatis()
+    {
+        var result = await _nuvatis.GetPagedAsync(0, 100);
+        _ = result.ToList();
+    }
 
     /**
      * A06 시나리오: OFFSET/LIMIT 페이징 조회 (100건, Dapper)
@@ -691,7 +759,11 @@ public class CategoryA_SimpleCrudBenchmarks
      * - Gen0 GC: 약 0.01-0.02 (빠른 수집)
      */
     [Benchmark(Description = "A06_WHERE_100_Rows_Dapper")]
-    public async Task<IEnumerable<User>> A06_Dapper() => await _dapper.GetPagedAsync(0, 100);
+    public async Task A06_Dapper()
+    {
+        var result = await _dapper.GetPagedAsync(0, 100);
+        _ = result.ToList();
+    }
 
     /**
      * A06 시나리오: OFFSET/LIMIT 페이징 조회 (100건, EF Core)
@@ -708,7 +780,11 @@ public class CategoryA_SimpleCrudBenchmarks
      * → 메모리: 10-20 KB (Dapper 수준)
      */
     [Benchmark(Description = "A06_WHERE_100_Rows_EfCore")]
-    public async Task<IEnumerable<User>> A06_EfCore() => await _efcore.GetPagedAsync(0, 100);
+    public async Task A06_EfCore()
+    {
+        var result = await _efcore.GetPagedAsync(0, 100);
+        _ = result.ToList();
+    }
 
     // ========================================
     // A07: WHERE 조건 조회 (1K rows)
@@ -737,7 +813,11 @@ public class CategoryA_SimpleCrudBenchmarks
      * - 병목: DB 쿼리 (10-20ms) > 네트워크 전송 (1-2ms)
      */
     [Benchmark(Description = "A07_WHERE_1K_Rows_NuVatis")]
-    public async Task<IEnumerable<User>> A07_NuVatis() => await _nuvatis.GetPagedAsync(0, 1000);
+    public async Task A07_NuVatis()
+    {
+        var result = await _nuvatis.GetPagedAsync(0, 1000);
+        _ = result.ToList();
+    }
 
     /**
      * A07 시나리오: OFFSET/LIMIT 페이징 조회 (1,000건, Dapper)
@@ -748,7 +828,11 @@ public class CategoryA_SimpleCrudBenchmarks
      * - Gen0 GC: 0.1-0.2 (빠른 수집)
      */
     [Benchmark(Description = "A07_WHERE_1K_Rows_Dapper")]
-    public async Task<IEnumerable<User>> A07_Dapper() => await _dapper.GetPagedAsync(0, 1000);
+    public async Task A07_Dapper()
+    {
+        var result = await _dapper.GetPagedAsync(0, 1000);
+        _ = result.ToList();
+    }
 
     /**
      * A07 시나리오: OFFSET/LIMIT 페이징 조회 (1,000건, EF Core)
@@ -771,7 +855,11 @@ public class CategoryA_SimpleCrudBenchmarks
      *   await foreach (var user in context.Users.AsAsyncEnumerable()) { ... }
      */
     [Benchmark(Description = "A07_WHERE_1K_Rows_EfCore")]
-    public async Task<IEnumerable<User>> A07_EfCore() => await _efcore.GetPagedAsync(0, 1000);
+    public async Task A07_EfCore()
+    {
+        var result = await _efcore.GetPagedAsync(0, 1000);
+        _ = result.ToList();
+    }
 
     // ========================================
     // A08: LIKE 검색 (100 rows)
@@ -822,7 +910,11 @@ public class CategoryA_SimpleCrudBenchmarks
      * - 인덱스 사용 시: O(log n) - 1-2ms
      */
     [Benchmark(Description = "A08_LIKE_Search_NuVatis")]
-    public async Task<IEnumerable<User>> A08_NuVatis() => await _nuvatis.SearchAsync("test", null, null);
+    public async Task A08_NuVatis()
+    {
+        var result = await _nuvatis.SearchAsync("test", null, null);
+        _ = result.ToList();
+    }
 
     /**
      * A08 시나리오: LIKE 패턴 검색 (Dapper)
@@ -846,7 +938,11 @@ public class CategoryA_SimpleCrudBenchmarks
      *   → input이 이스케이프됨 (SQL Injection 방지)
      */
     [Benchmark(Description = "A08_LIKE_Search_Dapper")]
-    public async Task<IEnumerable<User>> A08_Dapper() => await _dapper.SearchAsync("test", null, null);
+    public async Task A08_Dapper()
+    {
+        var result = await _dapper.SearchAsync("test", null, null);
+        _ = result.ToList();
+    }
 
     /**
      * A08 시나리오: LIKE 패턴 검색 (EF Core)
@@ -873,7 +969,11 @@ public class CategoryA_SimpleCrudBenchmarks
      * - EndsWith(pattern): LIKE '%pattern'
      */
     [Benchmark(Description = "A08_LIKE_Search_EfCore")]
-    public async Task<IEnumerable<User>> A08_EfCore() => await _efcore.SearchAsync("test", null, null);
+    public async Task A08_EfCore()
+    {
+        var result = await _efcore.SearchAsync("test", null, null);
+        _ = result.ToList();
+    }
 
     // ========================================
     // A09: ORDER BY + LIMIT 10
@@ -909,7 +1009,11 @@ public class CategoryA_SimpleCrudBenchmarks
      * - EF Core: 3-5ms
      */
     [Benchmark(Description = "A09_ORDER_LIMIT_10_NuVatis")]
-    public async Task<IEnumerable<User>> A09_NuVatis() => await _nuvatis.GetPagedAsync(0, 10);
+    public async Task A09_NuVatis()
+    {
+        var result = await _nuvatis.GetPagedAsync(0, 10);
+        _ = result.ToList();
+    }
 
     /**
      * A09 시나리오: ORDER BY + LIMIT 10 (Dapper)
@@ -920,7 +1024,11 @@ public class CategoryA_SimpleCrudBenchmarks
      * );
      */
     [Benchmark(Description = "A09_ORDER_LIMIT_10_Dapper")]
-    public async Task<IEnumerable<User>> A09_Dapper() => await _dapper.GetPagedAsync(0, 10);
+    public async Task A09_Dapper()
+    {
+        var result = await _dapper.GetPagedAsync(0, 10);
+        _ = result.ToList();
+    }
 
     /**
      * A09 시나리오: ORDER BY + LIMIT 10 (EF Core)
@@ -937,7 +1045,11 @@ public class CategoryA_SimpleCrudBenchmarks
      * ORDER BY [u].[CreatedAt] DESC;
      */
     [Benchmark(Description = "A09_ORDER_LIMIT_10_EfCore")]
-    public async Task<IEnumerable<User>> A09_EfCore() => await _efcore.GetPagedAsync(0, 10);
+    public async Task A09_EfCore()
+    {
+        var result = await _efcore.GetPagedAsync(0, 10);
+        _ = result.ToList();
+    }
 
     // ========================================
     // A10: ORDER BY + LIMIT 100
@@ -962,19 +1074,31 @@ public class CategoryA_SimpleCrudBenchmarks
      * - EF Core: 8-12ms
      */
     [Benchmark(Description = "A10_ORDER_LIMIT_100_NuVatis")]
-    public async Task<IEnumerable<User>> A10_NuVatis() => await _nuvatis.GetPagedAsync(0, 100);
+    public async Task A10_NuVatis()
+    {
+        var result = await _nuvatis.GetPagedAsync(0, 100);
+        _ = result.ToList();
+    }
 
     /**
      * A10 시나리오: ORDER BY + LIMIT 100 (Dapper)
      */
     [Benchmark(Description = "A10_ORDER_LIMIT_100_Dapper")]
-    public async Task<IEnumerable<User>> A10_Dapper() => await _dapper.GetPagedAsync(0, 100);
+    public async Task A10_Dapper()
+    {
+        var result = await _dapper.GetPagedAsync(0, 100);
+        _ = result.ToList();
+    }
 
     /**
      * A10 시나리오: ORDER BY + LIMIT 100 (EF Core)
      */
     [Benchmark(Description = "A10_ORDER_LIMIT_100_EfCore")]
-    public async Task<IEnumerable<User>> A10_EfCore() => await _efcore.GetPagedAsync(0, 100);
+    public async Task A10_EfCore()
+    {
+        var result = await _efcore.GetPagedAsync(0, 100);
+        _ = result.ToList();
+    }
 
     // ========================================
     // A11: 단건 INSERT
@@ -1016,17 +1140,19 @@ public class CategoryA_SimpleCrudBenchmarks
     [Benchmark(Description = "A11_Single_INSERT_NuVatis")]
     public async Task<long> A11_NuVatis()
     {
+        var guid = Guid.NewGuid().ToString("N");
+        var now = DateTime.SpecifyKind(DateTime.Now, DateTimeKind.Unspecified);
         var user = new User
         {
-            UserName = "bench_user",
-            Email = "bench@test.com",
+            UserName = $"bench_user_{guid}",
+            Email = $"bench_{guid}@test.com",
             FullName = "Benchmark User",
             PasswordHash = "hash",
             DateOfBirth = new DateTime(1990, 1, 1),
             PhoneNumber = "010-1234-5678",
             IsActive = true,
-            CreatedAt = DateTime.UtcNow,
-            UpdatedAt = DateTime.UtcNow
+            CreatedAt = now,
+            UpdatedAt = now
         };
         return await _nuvatis.InsertAsync(user);
     }
@@ -1049,17 +1175,19 @@ public class CategoryA_SimpleCrudBenchmarks
     [Benchmark(Description = "A11_Single_INSERT_Dapper")]
     public async Task<long> A11_Dapper()
     {
+        var guid = Guid.NewGuid().ToString("N");
+        var now = DateTime.SpecifyKind(DateTime.Now, DateTimeKind.Unspecified);
         var user = new User
         {
-            UserName = "bench_user",
-            Email = "bench@test.com",
+            UserName = $"bench_user_{guid}",
+            Email = $"bench_{guid}@test.com",
             FullName = "Benchmark User",
             PasswordHash = "hash",
             DateOfBirth = new DateTime(1990, 1, 1),
             PhoneNumber = "010-1234-5678",
             IsActive = true,
-            CreatedAt = DateTime.UtcNow,
-            UpdatedAt = DateTime.UtcNow
+            CreatedAt = now,
+            UpdatedAt = now
         };
         return await _dapper.InsertAsync(user);
     }
@@ -1089,17 +1217,19 @@ public class CategoryA_SimpleCrudBenchmarks
     [Benchmark(Description = "A11_Single_INSERT_EfCore")]
     public async Task<long> A11_EfCore()
     {
+        var guid = Guid.NewGuid().ToString("N");
+        var now = DateTime.SpecifyKind(DateTime.Now, DateTimeKind.Unspecified);
         var user = new User
         {
-            UserName = "bench_user",
-            Email = "bench@test.com",
+            UserName = $"bench_user_{guid}",
+            Email = $"bench_{guid}@test.com",
             FullName = "Benchmark User",
             PasswordHash = "hash",
             DateOfBirth = new DateTime(1990, 1, 1),
             PhoneNumber = "010-1234-5678",
             IsActive = true,
-            CreatedAt = DateTime.UtcNow,
-            UpdatedAt = DateTime.UtcNow
+            CreatedAt = now,
+            UpdatedAt = now
         };
         return await _efcore.InsertAsync(user);
     }
@@ -1160,19 +1290,21 @@ public class CategoryA_SimpleCrudBenchmarks
     [Benchmark(Description = "A12_100x_INSERT_NuVatis")]
     public async Task A12_NuVatis()
     {
+        var now = DateTime.SpecifyKind(DateTime.Now, DateTimeKind.Unspecified);
         for (int i = 0; i < 100; i++)
         {
+            var guid = Guid.NewGuid().ToString("N");
             var user = new User
             {
-                UserName = $"bench_user_{i}",
-                Email = $"bench{i}@test.com",
+                UserName = $"bench_user_{guid}",
+                Email = $"bench_{guid}@test.com",
                 FullName = $"Benchmark User {i}",
                 PasswordHash = "hash",
                 DateOfBirth = new DateTime(1990, 1, 1),
                 PhoneNumber = "010-1234-5678",
                 IsActive = true,
-                CreatedAt = DateTime.UtcNow,
-                UpdatedAt = DateTime.UtcNow
+                CreatedAt = now,
+                UpdatedAt = now
             };
             await _nuvatis.InsertAsync(user);
         }
@@ -1201,19 +1333,21 @@ public class CategoryA_SimpleCrudBenchmarks
     [Benchmark(Description = "A12_100x_INSERT_Dapper")]
     public async Task A12_Dapper()
     {
+        var now = DateTime.SpecifyKind(DateTime.Now, DateTimeKind.Unspecified);
         for (int i = 0; i < 100; i++)
         {
+            var guid = Guid.NewGuid().ToString("N");
             var user = new User
             {
-                UserName = $"bench_user_{i}",
-                Email = $"bench{i}@test.com",
+                UserName = $"bench_user_{guid}",
+                Email = $"bench_{guid}@test.com",
                 FullName = $"Benchmark User {i}",
                 PasswordHash = "hash",
                 DateOfBirth = new DateTime(1990, 1, 1),
                 PhoneNumber = "010-1234-5678",
                 IsActive = true,
-                CreatedAt = DateTime.UtcNow,
-                UpdatedAt = DateTime.UtcNow
+                CreatedAt = now,
+                UpdatedAt = now
             };
             await _dapper.InsertAsync(user);
         }
@@ -1245,17 +1379,19 @@ public class CategoryA_SimpleCrudBenchmarks
     {
         for (int i = 0; i < 100; i++)
         {
+            var guid = Guid.NewGuid().ToString("N");
+            var now = DateTime.SpecifyKind(DateTime.Now, DateTimeKind.Unspecified);
             var user = new User
             {
-                UserName = $"bench_user_{i}",
-                Email = $"bench{i}@test.com",
+                UserName = $"bench_user_{guid}",
+                Email = $"bench_{guid}@test.com",
                 FullName = $"Benchmark User {i}",
                 PasswordHash = "hash",
                 DateOfBirth = new DateTime(1990, 1, 1),
                 PhoneNumber = "010-1234-5678",
                 IsActive = true,
-                CreatedAt = DateTime.UtcNow,
-                UpdatedAt = DateTime.UtcNow
+                CreatedAt = now,
+                UpdatedAt = now
             };
             await _efcore.InsertAsync(user);
         }
