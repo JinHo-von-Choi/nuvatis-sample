@@ -5,6 +5,11 @@ using NuVatis.Benchmark.Core.Interfaces;
 using NuVatis.Benchmark.Dapper.Repositories;
 using NuVatis.Benchmark.EfCore.DbContexts;
 using NuVatis.Benchmark.EfCore.Repositories;
+using BenchmarkNuVatis.Mappers;
+using BenchmarkNuVatis.Repositories;
+using NuVatis.Session;
+using NuVatis.PostgreSql;
+using NuVatis.Benchmark.Runner.Helpers;
 
 namespace NuVatis.Benchmark.Runner.Benchmarks;
 
@@ -88,12 +93,28 @@ public class CategoryC_AggregateAnalyticsBenchmarks
         // Review Repository 초기화
         _reviewDapper = new DapperReviewRepository(connectionString);
         _reviewEfCore = new EfCoreReviewRepository(dbContext);
-        _reviewNuvatis = _reviewDapper; // Fallback
 
         // User Repository 초기화
         _userDapper = new DapperUserRepository(connectionString);
         _userEfCore = new EfCoreUserRepository(dbContext);
-        _userNuvatis = _userDapper; // Fallback
+
+        // NuVatis Review + User Repository 초기화
+        var xmlDir = Path.Combine(Directory.GetCurrentDirectory(), "Mappers", "Xml");
+        var nuvatisFactory = new SqlSessionFactoryBuilder()
+            .UseProvider(new PostgreSqlProvider())
+            .ConnectionString(connectionString)
+            .AddXmlConfiguration(Path.Combine(xmlDir, "IReviewMapper.xml"))
+            .AddXmlConfiguration(Path.Combine(xmlDir, "IUserMapper.xml"))
+            .Build();
+        DatabaseInitializer.LoadXmlMappers(nuvatisFactory.Configuration.Statements,
+            DatabaseInitializer.FindXmlFile("IReviewMapper.xml"),
+            DatabaseInitializer.FindXmlFile("IUserMapper.xml"));
+        var nuvatisMapperFactories = new Dictionary<Type, Func<ISqlSession, object>>();
+        NuVatis.NuVatisMapperRegistry.RegisterAll(nuvatisFactory, (type, factory) => nuvatisMapperFactories[type] = factory);
+        nuvatisFactory.SetMapperFactory((type, session) => nuvatisMapperFactories[type](session));
+        var nuvatisSession = nuvatisFactory.OpenSession(autoCommit: true);
+        _reviewNuvatis = new NuVatisReviewRepository(nuvatisSession.GetMapper<IReviewMapper>());
+        _userNuvatis = new NuVatisUserRepository(nuvatisSession.GetMapper<IUserMapper>());
 
         Console.WriteLine("[CategoryC GlobalSetup] All repositories initialized");
     }

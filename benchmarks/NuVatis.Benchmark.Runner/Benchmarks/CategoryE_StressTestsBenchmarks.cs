@@ -6,6 +6,11 @@ using NuVatis.Benchmark.Core.Models;
 using NuVatis.Benchmark.Dapper.Repositories;
 using NuVatis.Benchmark.EfCore.DbContexts;
 using NuVatis.Benchmark.EfCore.Repositories;
+using BenchmarkNuVatis.Mappers;
+using BenchmarkNuVatis.Repositories;
+using NuVatis.Session;
+using NuVatis.PostgreSql;
+using NuVatis.Benchmark.Runner.Helpers;
 
 namespace NuVatis.Benchmark.Runner.Benchmarks;
 
@@ -62,10 +67,25 @@ public class CategoryE_StressTestsBenchmarks
             ?? throw new InvalidOperationException("ConnectionString 'BenchmarkDb' not found");
 
         _userDapper = new DapperUserRepository(_connectionString);
-        _userNuvatis = _userDapper; // Fallback
-
         _orderDapper = new DapperOrderRepository(_connectionString);
-        _orderNuvatis = _orderDapper; // Fallback
+
+        // NuVatis User + Order Repository 초기화
+        var xmlDir = Path.Combine(Directory.GetCurrentDirectory(), "Mappers", "Xml");
+        var nuvatisFactory = new SqlSessionFactoryBuilder()
+            .UseProvider(new PostgreSqlProvider())
+            .ConnectionString(_connectionString)
+            .AddXmlConfiguration(Path.Combine(xmlDir, "IUserMapper.xml"))
+            .AddXmlConfiguration(Path.Combine(xmlDir, "IOrderMapper.xml"))
+            .Build();
+        DatabaseInitializer.LoadXmlMappers(nuvatisFactory.Configuration.Statements,
+            DatabaseInitializer.FindXmlFile("IUserMapper.xml"),
+            DatabaseInitializer.FindXmlFile("IOrderMapper.xml"));
+        var nuvatisMapperFactories = new Dictionary<Type, Func<ISqlSession, object>>();
+        NuVatis.NuVatisMapperRegistry.RegisterAll(nuvatisFactory, (type, factory) => nuvatisMapperFactories[type] = factory);
+        nuvatisFactory.SetMapperFactory((type, session) => nuvatisMapperFactories[type](session));
+        var nuvatisSession = nuvatisFactory.OpenSession(autoCommit: true);
+        _userNuvatis = new NuVatisUserRepository(nuvatisSession.GetMapper<IUserMapper>());
+        _orderNuvatis = new NuVatisOrderRepository(nuvatisSession.GetMapper<IOrderMapper>());
 
         Console.WriteLine("[CategoryE GlobalSetup] All repositories initialized");
     }

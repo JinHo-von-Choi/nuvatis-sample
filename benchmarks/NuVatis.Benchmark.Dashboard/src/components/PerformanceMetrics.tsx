@@ -93,56 +93,71 @@ export default function PerformanceMetrics({ data }: Props) {
       <div className="bg-slate-800 p-6 rounded-xl">
         <h2 className="text-2xl font-bold mb-6">효율성 점수 (Efficiency Score)</h2>
         <div className="grid grid-cols-3 gap-6">
-          {orms.map(orm => {
-            const ormData = data.filter(d => d.orm === orm);
+          {(() => {
+            // 1단계: 각 ORM의 원시 지표 계산
+            const ormMetrics = orms.map(orm => {
+              const ormData = data.filter(d => d.orm === orm);
+              return {
+                orm,
+                avgLatency : avg(ormData.map(d => d.meanMs)),
+                avgMemory  : avg(ormData.map(d => d.memoryMB)),
+                avgAlloc   : avg(ormData.map(d => d.allocatedBytesPerOp)),
+                totalGC    : sum(ormData.map(d => d.gen0 + d.gen1 + d.gen2)),
+              };
+            });
 
-            // 효율성 점수 계산 (낮을수록 좋은 메트릭들의 정규화된 합)
-            const avgLatency = avg(ormData.map(d => d.meanMs));
-            const avgMemory = avg(ormData.map(d => d.memoryMB));
-            const avgAlloc = avg(ormData.map(d => d.allocatedBytesPerOp));
-            const totalGC = sum(ormData.map(d => d.gen0 + d.gen1 + d.gen2));
+            // 2단계: 각 지표의 최악값(최댓값) 산출 — 0 나눗셈 방지로 최솟값 1 보장
+            const maxLatency = Math.max(1, ...ormMetrics.map(m => m.avgLatency));
+            const maxMemory  = Math.max(1, ...ormMetrics.map(m => m.avgMemory));
+            const maxAlloc   = Math.max(1, ...ormMetrics.map(m => m.avgAlloc));
+            const maxGC      = Math.max(1, ...ormMetrics.map(m => m.totalGC));
 
-            // 정규화 (0-100 스케일, 낮을수록 좋음)
-            const score =
-              (avgLatency / 50) * 25 +
-              (avgMemory / 50) * 25 +
-              (avgAlloc / 100000) * 25 +
-              (totalGC / 500) * 25;
+            // 3단계: 상대 점수 계산 — 최악 대비 얼마나 나은지 (0~25, 합산 0~100)
+            return ormMetrics.map(({ orm, avgLatency, avgMemory, avgAlloc, totalGC }) => {
+              const score =
+                (1 - avgLatency / maxLatency) * 25 +
+                (1 - avgMemory  / maxMemory)  * 25 +
+                (1 - avgAlloc   / maxAlloc)   * 25 +
+                (1 - totalGC    / maxGC)      * 25;
 
-            const grade = score < 40 ? 'A' : score < 60 ? 'B' : score < 80 ? 'C' : 'D';
-            const gradeColor =
-              grade === 'A' ? 'text-green-400' :
-              grade === 'B' ? 'text-blue-400' :
-              grade === 'C' ? 'text-amber-400' : 'text-red-400';
+              const grade =
+                score >= 75 ? 'A' :
+                score >= 50 ? 'B' :
+                score >= 25 ? 'C' : 'D';
+              const gradeColor =
+                grade === 'A' ? 'text-green-400' :
+                grade === 'B' ? 'text-blue-400'  :
+                grade === 'C' ? 'text-amber-400' : 'text-red-400';
 
-            return (
-              <div key={orm} className="bg-slate-700 p-6 rounded-lg text-center">
-                <h3 className="text-xl font-bold mb-4">{orm}</h3>
-                <div className={`text-6xl font-bold mb-2 ${gradeColor}`}>{grade}</div>
-                <div className="text-2xl font-semibold text-slate-300 mb-4">
-                  {(100 - score).toFixed(1)}/100
+              return (
+                <div key={orm} className="bg-slate-700 p-6 rounded-lg text-center">
+                  <h3 className="text-xl font-bold mb-4">{orm}</h3>
+                  <div className={`text-6xl font-bold mb-2 ${gradeColor}`}>{grade}</div>
+                  <div className="text-2xl font-semibold text-slate-300 mb-4">
+                    {score.toFixed(1)}/100
+                  </div>
+                  <div className="space-y-2 text-sm text-left">
+                    <div className="flex justify-between">
+                      <span className="text-slate-400">응답 시간</span>
+                      <span>{avgLatency.toFixed(2)} ms</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-slate-400">메모리</span>
+                      <span>{avgMemory.toFixed(1)} MB</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-slate-400">할당/Op</span>
+                      <span>{(avgAlloc / 1024).toFixed(1)} KB</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-slate-400">총 GC</span>
+                      <span>{totalGC}</span>
+                    </div>
+                  </div>
                 </div>
-                <div className="space-y-2 text-sm text-left">
-                  <div className="flex justify-between">
-                    <span className="text-slate-400">응답 시간</span>
-                    <span>{avgLatency.toFixed(2)} ms</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-slate-400">메모리</span>
-                    <span>{avgMemory.toFixed(1)} MB</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-slate-400">할당/Op</span>
-                    <span>{(avgAlloc / 1024).toFixed(1)} KB</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-slate-400">총 GC</span>
-                    <span>{totalGC}</span>
-                  </div>
-                </div>
-              </div>
-            );
-          })}
+              );
+            });
+          })()}
         </div>
       </div>
 

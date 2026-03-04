@@ -6,6 +6,8 @@ using NuVatis.Benchmark.Dapper.Repositories;
 using BenchmarkNuVatis.Mappers;
 using BenchmarkNuVatis.Repositories;
 using NuVatis.Benchmark.Runner.Helpers;
+using NuVatis.Session;
+using NuVatis.PostgreSql;
 // EF Core using은 제거하고 Setup()에서 풀 네임스페이스로 사용 (Windows Defender 차단 회피)
 
 namespace NuVatis.Benchmark.Runner.Benchmarks;
@@ -225,18 +227,20 @@ public class CategoryA_SimpleCrudBenchmarks
         }
 
         // NuVatis Repository 초기화
-        // TODO: Source Generator 네임스페이스 버그로 인해 현재 Dapper fallback 사용
-        // 정상 작동 시 코드:
-        //   var sessionFactory = new SqlSessionFactoryBuilder()
-        //       .Build(connectionString);  // 또는 XML 설정 파일
-        //   var session = sessionFactory.OpenSession();
-        //   var userMapper = session.GetMapper<IUserMapper>();
-        //   _nuvatis = new NuVatisUserRepository(userMapper);
-        //
-        // 현재 Dapper fallback 사용
-        // 임시로 Dapper를 사용
-        _nuvatis = _dapper;
-        Console.WriteLine("[GlobalSetup] NuVatis Repository initialized (using Dapper as fallback)");
+        var nuvatisFactory = new SqlSessionFactoryBuilder()
+            .UseProvider(new PostgreSqlProvider())
+            .ConnectionString(connectionString)
+            .AddXmlConfiguration(DatabaseInitializer.FindXmlFile("IUserMapper.xml"))
+            .Build();
+        DatabaseInitializer.LoadXmlMappers(nuvatisFactory.Configuration.Statements,
+            DatabaseInitializer.FindXmlFile("IUserMapper.xml"));
+        var nuvatisMapperFactories = new Dictionary<Type, Func<ISqlSession, object>>();
+        NuVatis.NuVatisMapperRegistry.RegisterAll(nuvatisFactory, (type, factory) => nuvatisMapperFactories[type] = factory);
+        nuvatisFactory.SetMapperFactory((type, session) => nuvatisMapperFactories[type](session));
+        var nuvatisSession = nuvatisFactory.OpenSession(autoCommit: true);
+        var userMapper = nuvatisSession.GetMapper<IUserMapper>();
+        _nuvatis = new NuVatisUserRepository(userMapper);
+        Console.WriteLine("[GlobalSetup] NuVatis Repository initialized");
 
         Console.WriteLine("[GlobalSetup] All repositories initialized successfully\n");
     }

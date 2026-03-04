@@ -1,5 +1,7 @@
 using Npgsql;
+using NuVatis.Statement;
 using System.Diagnostics;
+using System.Xml.Linq;
 
 namespace NuVatis.Benchmark.Runner.Helpers;
 
@@ -158,5 +160,88 @@ public static class DatabaseInitializer
     {
         Console.WriteLine("기존 데이터를 삭제하고 재초기화합니다...");
         return await InitializeAsync(connectionString, forceReset: true);
+    }
+
+    /**
+     * XML 매퍼 파일을 파싱하여 MappedStatement를 statements 딕셔너리에 등록한다.
+     *
+     * SqlSessionFactoryBuilder.BuildConfiguration()이 _xmlConfigPath를 무시하는 버그를
+     * 우회하기 위해 런타임에 직접 XML을 파싱하여 Statements를 채운다.
+     *
+     * 동적 SQL 태그(<where>, <if>, <foreach>)는 element.Value.Trim()으로 텍스트만 추출되어
+     * 해당 구문의 SQL이 불완전해질 수 있다. 정적 SQL 구문은 정상 동작한다.
+     *
+     * @param statements NuVatisConfiguration.Statements 딕셔너리 (mutable)
+     * @param xmlPaths   파싱할 XML 매퍼 파일 경로 목록
+     */
+    public static void LoadXmlMappers(Dictionary<string, MappedStatement> statements, params string[] xmlPaths)
+    {
+        foreach (var path in xmlPaths)
+        {
+            if (!File.Exists(path))
+                throw new FileNotFoundException($"XML 매퍼 파일을 찾을 수 없습니다: {path}");
+
+            var doc       = XDocument.Load(path);
+            var mapper    = doc.Root ?? throw new InvalidOperationException($"XML 루트 요소가 없습니다: {path}");
+            var ns        = mapper.Attribute("namespace")?.Value
+                            ?? throw new InvalidOperationException($"mapper 요소에 namespace 속성이 없습니다: {path}");
+
+            var elementTypeMap = new Dictionary<string, NuVatis.Statement.StatementType>(StringComparer.OrdinalIgnoreCase) {
+                { "select", NuVatis.Statement.StatementType.Select },
+                { "insert", NuVatis.Statement.StatementType.Insert },
+                { "update", NuVatis.Statement.StatementType.Update },
+                { "delete", NuVatis.Statement.StatementType.Delete }
+            };
+
+            foreach (var element in mapper.Elements())
+            {
+                if (!elementTypeMap.TryGetValue(element.Name.LocalName, out var statementType))
+                    continue;
+
+                var id = element.Attribute("id")?.Value;
+                if (string.IsNullOrEmpty(id))
+                    continue;
+
+                var resultMapId = element.Attribute("resultMap")?.Value;
+                var sqlSource   = element.Value.Trim();
+
+                var statement = new MappedStatement {
+                    Id          = id,
+                    Namespace   = ns,
+                    Type        = statementType,
+                    SqlSource   = sqlSource,
+                    ResultMapId = resultMapId
+                };
+
+                statements[statement.FullId] = statement;
+            }
+
+            Console.WriteLine($"✓ XML 매퍼 로드: {Path.GetFileName(path)} ({statements.Count}개 구문 등록)");
+        }
+    }
+
+    /**
+     * BenchmarkDotNet isolated process 환경에서 Mappers/Xml 디렉토리를 탐색
+     *
+     * BenchmarkDotNet은 각 벤치마크를 {output}/{guid}/bin/Release/net8.0/ 에서 실행한다.
+     * AppContext.BaseDirectory가 isolated 디렉토리를 가리키므로
+     * XML 파일이 있는 실제 output 디렉토리까지 부모 디렉토리를 재귀 탐색한다.
+     *
+     * @param mapperXmlSubPath Mappers/Xml 하위의 상대 경로 (예: "IUserMapper.xml")
+     * @return XML 파일의 절대 경로
+     * @throws DirectoryNotFoundException Mappers/Xml 디렉토리를 찾지 못한 경우
+     */
+    public static string FindXmlFile(string mapperXmlSubPath)
+    {
+        var dir = new DirectoryInfo(AppContext.BaseDirectory);
+        while (dir != null)
+        {
+            var xmlDir = Path.Combine(dir.FullName, "Mappers", "Xml");
+            if (Directory.Exists(xmlDir))
+                return Path.Combine(xmlDir, mapperXmlSubPath);
+            dir = dir.Parent;
+        }
+        throw new DirectoryNotFoundException(
+            $"Mappers/Xml 디렉토리를 찾을 수 없습니다. 탐색 시작: {AppContext.BaseDirectory}");
     }
 }

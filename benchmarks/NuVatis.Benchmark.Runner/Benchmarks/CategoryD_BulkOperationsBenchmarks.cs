@@ -6,6 +6,11 @@ using NuVatis.Benchmark.Core.Models;
 using NuVatis.Benchmark.Dapper.Repositories;
 using NuVatis.Benchmark.EfCore.DbContexts;
 using NuVatis.Benchmark.EfCore.Repositories;
+using BenchmarkNuVatis.Mappers;
+using BenchmarkNuVatis.Repositories;
+using NuVatis.Session;
+using NuVatis.PostgreSql;
+using NuVatis.Benchmark.Runner.Helpers;
 
 namespace NuVatis.Benchmark.Runner.Benchmarks;
 
@@ -78,7 +83,21 @@ public class CategoryD_BulkOperationsBenchmarks
         optionsBuilder.UseNpgsql(connectionString);
         var dbContext = new BenchmarkDbContext(optionsBuilder.Options);
         _userEfCore = new EfCoreUserRepository(dbContext);
-        _userNuvatis = _userDapper; // Fallback
+
+        // NuVatis User Repository 초기화
+        var xmlDir = Path.Combine(Directory.GetCurrentDirectory(), "Mappers", "Xml");
+        var nuvatisFactory = new SqlSessionFactoryBuilder()
+            .UseProvider(new PostgreSqlProvider())
+            .ConnectionString(connectionString)
+            .AddXmlConfiguration(Path.Combine(xmlDir, "IUserMapper.xml"))
+            .Build();
+        DatabaseInitializer.LoadXmlMappers(nuvatisFactory.Configuration.Statements,
+            DatabaseInitializer.FindXmlFile("IUserMapper.xml"));
+        var nuvatisMapperFactories = new Dictionary<Type, Func<ISqlSession, object>>();
+        NuVatis.NuVatisMapperRegistry.RegisterAll(nuvatisFactory, (type, factory) => nuvatisMapperFactories[type] = factory);
+        nuvatisFactory.SetMapperFactory((type, session) => nuvatisMapperFactories[type](session));
+        var nuvatisSession = nuvatisFactory.OpenSession(autoCommit: true);
+        _userNuvatis = new NuVatisUserRepository(nuvatisSession.GetMapper<IUserMapper>());
 
         _users1K = GenerateUsers(1000);
         Console.WriteLine("[CategoryD GlobalSetup] All repositories initialized, test data generated");
@@ -502,7 +521,7 @@ public class CategoryD_BulkOperationsBenchmarks
     [Benchmark(Description = "D09_Single_UPDATE_NuVatis")]
     public async Task<int> D09_NuVatis()
     {
-        var now = DateTime.UtcNow;
+        var now = DateTime.SpecifyKind(DateTime.Now, DateTimeKind.Unspecified);
         var user = new User
         {
             Id = 12345,
@@ -523,7 +542,7 @@ public class CategoryD_BulkOperationsBenchmarks
     [Benchmark(Description = "D09_Single_UPDATE_Dapper")]
     public async Task<int> D09_Dapper()
     {
-        var now = DateTime.UtcNow;
+        var now = DateTime.SpecifyKind(DateTime.Now, DateTimeKind.Unspecified);
         var user = new User
         {
             Id = 12345,
@@ -544,7 +563,7 @@ public class CategoryD_BulkOperationsBenchmarks
     [Benchmark(Description = "D09_Single_UPDATE_EfCore")]
     public async Task<int> D09_EfCore()
     {
-        var now = DateTime.UtcNow;
+        var now = DateTime.SpecifyKind(DateTime.Now, DateTimeKind.Unspecified);
         var user = new User
         {
             Id = 12345,
@@ -600,7 +619,7 @@ public class CategoryD_BulkOperationsBenchmarks
     {
         var users = new List<User>();
         var timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
-        var now = DateTime.UtcNow;
+        var now = DateTime.SpecifyKind(DateTime.Now, DateTimeKind.Unspecified);
 
         for (int i = 0; i < count; i++)
         {
@@ -610,7 +629,7 @@ public class CategoryD_BulkOperationsBenchmarks
                 Email = $"bulk{timestamp}_{i}@test.com",
                 FullName = $"Bulk User {i}",
                 PasswordHash = "hash",
-                DateOfBirth = new DateTime(1990, 1, 1, 0, 0, 0, DateTimeKind.Utc),
+                DateOfBirth = new DateTime(1990, 1, 1),
                 PhoneNumber = "010-0000-0000",
                 IsActive = true,
                 CreatedAt = now,
@@ -630,7 +649,7 @@ public class CategoryD_BulkOperationsBenchmarks
     private static User CreateTestUser()
     {
         var timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
-        var now = DateTime.UtcNow;
+        var now = DateTime.SpecifyKind(DateTime.Now, DateTimeKind.Unspecified);
         return new User
         {
             UserName = $"tx_user_{timestamp}_{Guid.NewGuid():N}",
@@ -650,7 +669,7 @@ public class CategoryD_BulkOperationsBenchmarks
      */
     private static Address CreateTestAddress()
     {
-        var now = DateTime.UtcNow;
+        var now = DateTime.SpecifyKind(DateTime.Now, DateTimeKind.Unspecified);
         return new()
         {
             AddressType = "shipping",

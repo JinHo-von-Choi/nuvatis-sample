@@ -6,6 +6,11 @@ using NuVatis.Benchmark.Core.Models;
 using NuVatis.Benchmark.Dapper.Repositories;
 using NuVatis.Benchmark.EfCore.DbContexts;
 using NuVatis.Benchmark.EfCore.Repositories;
+using NuVatis.Benchmark.Runner.Helpers;
+using BenchmarkNuVatis.Mappers;
+using BenchmarkNuVatis.Repositories;
+using NuVatis.Session;
+using NuVatis.PostgreSql;
 
 namespace NuVatis.Benchmark.Runner.Benchmarks;
 
@@ -120,12 +125,26 @@ public class CategoryB_JoinComplexityBenchmarks
         optionsBuilder.UseNpgsql(connectionString);
         var dbContext = new BenchmarkDbContext(optionsBuilder.Options);
         _userEfCore = new EfCoreUserRepository(dbContext);
-        _userNuvatis = _userDapper; // Fallback
+        // NuVatis User + Order Repository 초기화
+        var nuvatisFactory = new SqlSessionFactoryBuilder()
+            .UseProvider(new PostgreSqlProvider())
+            .ConnectionString(connectionString)
+            .AddXmlConfiguration(DatabaseInitializer.FindXmlFile("IUserMapper.xml"))
+            .AddXmlConfiguration(DatabaseInitializer.FindXmlFile("IOrderMapper.xml"))
+            .Build();
+        DatabaseInitializer.LoadXmlMappers(nuvatisFactory.Configuration.Statements,
+            DatabaseInitializer.FindXmlFile("IUserMapper.xml"),
+            DatabaseInitializer.FindXmlFile("IOrderMapper.xml"));
+        var nuvatisMapperFactories = new Dictionary<Type, Func<ISqlSession, object>>();
+        NuVatis.NuVatisMapperRegistry.RegisterAll(nuvatisFactory, (type, factory) => nuvatisMapperFactories[type] = factory);
+        nuvatisFactory.SetMapperFactory((type, session) => nuvatisMapperFactories[type](session));
+        var nuvatisSession = nuvatisFactory.OpenSession(autoCommit: true);
+        _userNuvatis = new NuVatisUserRepository(nuvatisSession.GetMapper<IUserMapper>());
 
         // Order Repository 초기화
         _orderDapper = new DapperOrderRepository(connectionString);
         _orderEfCore = new EfCoreOrderRepository(dbContext);
-        _orderNuvatis = _orderDapper; // Fallback
+        _orderNuvatis = new NuVatisOrderRepository(nuvatisSession.GetMapper<IOrderMapper>());
 
         Console.WriteLine("[CategoryB GlobalSetup] All repositories initialized");
     }
