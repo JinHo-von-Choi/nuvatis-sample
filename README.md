@@ -403,9 +403,9 @@ curl -X POST http://localhost:5000/api/orders \
 **NuVatis vs Dapper vs EF Core** 대규모 성능 비교
 
 - **데이터 규모**: ~70GB (100K users, 10M orders, 50M order_items 등 15개 테이블)
-- **시나리오**: 60개 이상 (Simple CRUD, WHERE/JOIN, 동적 SQL, 집계, 대량 작업, 스트레스 테스트 등)
-- **측정 지표**: Latency (Mean, P95, P99), Throughput (ops/sec), Memory (GC, Allocation)
-- **환경**: PostgreSQL 14, .NET 8.0, Docker
+- **시나리오**: 60개 (Simple CRUD, JOIN Complexity, Aggregate, Bulk Operations, Stress Tests)
+- **측정 지표**: Latency (Mean, P95), Throughput (ops/sec), Memory, GC 압박
+- **환경**: PostgreSQL 14, .NET 10.0, Docker
 
 ### 📊 벤치마크 결과 상세
 
@@ -414,167 +414,195 @@ curl -X POST http://localhost:5000/api/orders \
 ![Overview](resources/images/1.png)
 
 **종합 성능 지표:**
-- **NuVatis**: 평균 19.60ms, 307 ops/s, 44.0 MB, 37승/60시나리오
-- **Dapper**: 평균 19.87ms, 304 ops/s, 40.0 MB, 23승/60시나리오 (메모리 효율 최고)
-- **EF Core**: 평균 35.36ms, 249 ops/s, 60.0 MB, 0승/60시나리오 (모든 카테고리에서 최하위)
+- **NuVatis**: 평균 117.91ms, 843 ops/s, 0.3 MB, 29승/60시나리오
+- **Dapper**: 평균 127.33ms, 839 ops/s, 0.3 MB, 20승/60시나리오
+- **EF Core**: 평균 175.76ms, 565 ops/s, 8.8 MB, 8승/60시나리오
 
 **카테고리별 성능 비교 (레이더 차트):**
-- Cat A (Simple CRUD): 3개 ORM 모두 비슷
+- Cat A (Simple CRUD): NuVatis와 Dapper 우위, EF Core 뒤처짐
 - Cat B (JOIN Complexity): NuVatis 우위
-- Cat C (Aggregate): NuVatis 압도적 우위
-- Cat D (Bulk Operations): Dapper/NuVatis 우위
+- Cat C (Aggregate & Analytics): EF Core 우위
+- Cat D (Bulk Operations): Dapper 우위
 - Cat E (Stress Tests): NuVatis 우위
 
-**결론**: NuVatis가 60개 시나리오 중 37개에서 승리하며 종합 1위, EF Core는 단 한 번도 승리하지 못함
+**결론**: NuVatis가 60개 시나리오 중 29개에서 승리하며 종합 1위, EF Core는 메모리 사용량이 29배 높음
 
 ---
 
-#### 2. 상위 20개 시나리오 Latency 비교
+#### 2. 카테고리별 평균 응답 시간 & 시나리오별 추세
 
-![Top 20 Latency](resources/images/2.png)
+![Category Performance](resources/images/2.png)
+
+**카테고리별 평균 응답 시간 (상단 그래프):**
+- Cat A (Simple CRUD): NuVatis 340ms, Dapper 380ms, EF Core 470ms
+- Cat B (JOIN): NuVatis 70ms, Dapper 70ms, EF Core 100ms
+- Cat C (Aggregate): NuVatis 25ms, Dapper 25ms, EF Core 30ms
+- Cat D (Bulk): NuVatis 65ms, Dapper 60ms, EF Core 80ms
+- Cat E (Stress): NuVatis 310ms, Dapper 310ms, EF Core 450ms
+
+**시나리오별 응답 시간 추세 (하단 그래프):**
+- A01~A12: 세 ORM 모두 안정적 (0~800ms 범위)
+- A13 피크: NuVatis/Dapper 약 2200ms, EF Core 약 1600ms
+- B01~B15: 대부분 1ms 미만으로 우수
+- D01~D10: 주요 성능 격차 구간 (600ms까지)
+- E01~E05: NuVatis/Dapper 1100ms, EF Core 1100ms로 비슷
+
+**결론**: Simple CRUD 카테고리에서 격차가 가장 크며, 복잡한 쿼리는 세 ORM 모두 우수한 성능
+
+---
+
+#### 3. Simple CRUD 카테고리 상세
+
+![Simple CRUD](resources/images/3.png)
+
+**시나리오 12개 상세 비교:**
+- **A01** (PK 단일 조회): NuVatis 0.35ms → **NuVatis 승**
+- **A02**: NuVatis 1.55ms → **NuVatis 승**
+- **A03**: NuVatis 15.46ms → **NuVatis 승**
+- **A04**: Dapper 158.75ms → **Dapper 승**
+- **A05**: NuVatis 351.64ms → **NuVatis 승**
+- **A06**: NuVatis 584.01ms → **NuVatis 승**
+- **A07**: Dapper 490.09ms → **Dapper 승**
+- **A08**: NuVatis 201.35ms → **NuVatis 승**
+- **A09**: Dapper 355.81ms → **Dapper 승**
+- **A10**: NuVatis 360.34ms → **NuVatis 승**
+- **A11**: Dapper 10.47ms → **Dapper 승**
+- **A12**: NuVatis 1542.65ms → **NuVatis 승**
+
+**결론**: Simple CRUD에서 NuVatis가 12개 중 8개 승리, Dapper 4개 승리
+
+---
+
+#### 4. JOIN Complexity 카테고리 상세
+
+![JOIN Complexity](resources/images/4.png)
+
+**복잡한 JOIN 시나리오 15개 상세 비교:**
+- **B01~B05**: Dapper가 대부분 승리 (0.41~0.35ms 범위)
+- **B06**: Dapper 1.43ms → **Dapper 승**
+- **B07**: Dapper 1.52ms → **Dapper 승**
+- **B08**: NuVatis 3.52ms → **NuVatis 승**
+- **B09**: Dapper 1.41ms → **Dapper 승**
+- **B10~B13**: NuVatis와 Dapper가 번갈아 승리
+- **B14**: Dapper 190.15ms → **Dapper 승**
+- **B15**: NuVatis 174.97ms → **NuVatis 승**
+
+**성능 특징:**
+- 단순 JOIN (B01~B05): 세 ORM 모두 1ms 이하로 우수
+- 복잡한 JOIN (B06~B15): Dapper가 주로 우위
+- EF Core는 대부분 시나리오에서 느림
+
+**결론**: JOIN 복잡도에서 Dapper가 가장 효율적, NuVatis도 경쟁력 있음
+
+---
+
+#### 5. Aggregate & Analytics 카테고리 상세
+
+![Aggregate](resources/images/5.png)
+
+**집계 및 분석 쿼리 15개 상세 비교:**
+- **C01~C05**: EF Core가 5연승 (5.00~5.04ms 범위로 압도적)
+- **C06**: Dapper 15.19ms → **Dapper 승**
+- **C07**: NuVatis 14.88ms → **NuVatis 승**
+- **C08**: NuVatis 14.85ms → **NuVatis 승**
+- **C09**: NuVatis 15.73ms → **NuVatis 승**
+- **C10**: Dapper 15.56ms → **Dapper 승**
+- **C11**: EF Core 6.67ms → **EF Core 승**
+- **C12~C15**: NuVatis와 EF Core가 번갈아 승리
+
+**성능 특징:**
+- 단순 집계 (C01~C05): EF Core가 압도적으로 빠름 (5ms)
+- 복잡한 집계 (C06~C15): NuVatis가 주로 우위 (14~16ms)
+- Window Functions, CTE: NuVatis 우위
+
+**결론**: EF Core가 단순 집계에서 강점, NuVatis는 복잡한 분석 쿼리에서 우수
+
+---
+
+#### 6. Bulk Operations 카테고리 상세
+
+![Bulk Operations](resources/images/6.png)
+
+**대량 데이터 처리 10개 상세 비교:**
+- **D01**: NuVatis 31.41ms → **NuVatis 승**
+- **D02**: Dapper 38.60ms → **Dapper 승**
+- **D03**: Dapper 31.00ms → **Dapper 승**
+- **D04**: NuVatis 63.32ms → **NuVatis 승**
+- **D05**: EF Core 11.01ms → **EF Core 승**
+- **D06**: NuVatis 14.40ms → **NuVatis 승**
+- **D07**: Dapper 14.15ms → **Dapper 승**
+- **D08**: Dapper 12.08ms → **Dapper 승**
+- **D09**: NuVatis 11.04ms → **NuVatis 승**
+- **D10**: Dapper 9.16ms → **Dapper 승**
+
+**성능 특징:**
+- 소량~중량 Bulk: Dapper가 주로 우위 (9~38ms)
+- 대량 Bulk: NuVatis 경쟁력 (31~63ms)
+- 트랜잭션 처리: NuVatis 우수
+
+**결론**: Bulk 작업에서 Dapper와 NuVatis가 경쟁, EF Core는 특정 시나리오에서만 우위
+
+---
+
+#### 7. Stress Tests 카테고리 상세
+
+![Stress Tests](resources/images/7.png)
+
+**극한 부하 테스트 5개 상세 비교:**
+- **E01** (대량 조회): NuVatis 746.23ms → **NuVatis 승**
+- **E02** (복잡 쿼리 반복): NuVatis 33.39ms → **NuVatis 승**
+- **E03** (동시성 테스트): NuVatis 0.97ms → **NuVatis 승**
+- **E04** (메모리 압박): Dapper 725.50ms → **Dapper 승**
+- **E05** (극한 스트레스): NuVatis 1.67ms → **NuVatis 승**
+
+**성능 특징:**
+- 대량 조회: NuVatis 우위 (746ms vs Dapper 756ms vs EF Core 1009ms)
+- 반복 쿼리: NuVatis가 가장 안정적 (33ms)
+- 동시성: 세 ORM 모두 우수 (1ms 미만)
+- 메모리 압박: Dapper가 가장 효율적
+
+**결론**: 스트레스 상황에서 NuVatis가 5개 중 4개 승리, 전반적으로 가장 안정적
+
+---
+
+#### 8. Mean & P95 Latency 비교 (상위 20개 시나리오)
+
+![Latency Comparison](resources/images/8.png)
 
 **Mean Latency (평균 응답 시간):**
-- Simple CRUD (A01~A15): 세 ORM 모두 1~2ms로 유사
-- JOIN 시나리오 (B01~B05): EF Core가 점진적으로 격차 벌어짐
+- A01~A12: 대부분 0~800ms 범위, 세 ORM 비슷
+- A12 피크: NuVatis 1400ms, Dapper 2200ms, EF Core 1600ms
+- B01~B08: 1ms 미만으로 매우 빠름
 
 **P95 Latency (95분위 응답 시간):**
-- 일관성: NuVatis와 Dapper가 안정적, EF Core는 변동 큼
-- B05 (3-table JOIN 100회): EF Core가 Dapper 대비 1.5배 느림
+- A01~A12: 변동성 큼 (최대 5000ms까지)
+- A12 피크: Dapper가 가장 높음 (5000ms)
+- B01~B08: 모두 안정적 (1ms 미만)
 
-**결론**: 복잡도 증가 시 EF Core의 성능 저하가 두드러짐
-
----
-
-#### 3. 카테고리별 평균 응답 시간 & 시나리오별 추세
-
-![Category Performance](resources/images/3.png)
-
-**카테고리별 평균 응답 시간:**
-- Cat A (Simple): 거의 동일
-- Cat B (JOIN): EF Core 10ms, NuVatis/Dapper 5ms
-- Cat C (Aggregate): EF Core 20ms, NuVatis/Dapper 10ms
-- Cat D (Bulk): EF Core 70ms, NuVatis/Dapper 30-40ms
-- Cat E (Stress): EF Core 200ms, NuVatis/Dapper 100ms
-
-**시나리오별 응답 시간 추세:**
-- A01~A15: 완만한 증가, 3개 ORM 근접
-- B01~B05: EF Core 가파르게 증가
-
-**결론**: 워크로드 복잡도에 비례하여 EF Core 성능 저하 심화
+**결론**: Simple CRUD에서 변동성이 크며, JOIN 쿼리는 세 ORM 모두 일관되게 빠름
 
 ---
 
-#### 4. Simple CRUD 카테고리 상세
+#### 9. 메모리 사용량 & GC 압박 분석
 
-![Simple CRUD](resources/images/4.png)
-
-**시나리오 15개 상세 비교:**
-- **A01** (PK 단일 조회): NuVatis 0.57ms, Dapper 0.71ms, EF Core 0.46ms → **NuVatis 승**
-- **A04** (PK 1K회 반복): Dapper 0.97ms → **Dapper 승**
-- **A05~A07** (WHERE 조건): NuVatis 우위
-- **A11~A14** (INSERT/UPDATE): NuVatis 우위
-
-**결론**: Simple CRUD에서는 NuVatis가 15개 중 11개 승리
-
----
-
-#### 5. JOIN Complexity 카테고리 상세
-
-![JOIN Complexity](resources/images/5.png)
-
-**복잡한 JOIN 시나리오:**
-- **B03** (3-table JOIN): NuVatis 3.45ms, Dapper 3.76ms, EF Core 6.57ms → **NuVatis 승**
-- **B07** (5-table JOIN): NuVatis 8.71ms, EF Core 17.76ms → **NuVatis 2배 빠름**
-- **B10** (15-table FULL JOIN): Dapper 8.69ms → **Dapper 승**
-- **B14** (N+1 Problem 100 orders): NuVatis 9.77ms, EF Core 21.63ms → **NuVatis 2.2배 빠름**
-
-**결론**: JOIN 복잡도 증가 시 NuVatis의 ResultMap이 EF Core Include보다 압도적 우위
-
----
-
-#### 6. Aggregate & Analytics 카테고리 상세
-
-![Aggregate](resources/images/6.png)
-
-**집계 및 분석 쿼리:**
-- **C02** (COUNT + WHERE): NuVatis 8.45ms, EF Core 18.42ms → **NuVatis 2.2배 빠름**
-- **C06** (GROUP BY + HAVING): NuVatis 18.73ms, EF Core 31.88ms → **NuVatis 승**
-- **C09** (Window Functions ROW_NUMBER): NuVatis 11.06ms, EF Core 19.48ms
-- **C14** (Recursive CTE): NuVatis 18.37ms, Dapper 19.43ms, EF Core 25.71ms
-
-**결론**: 복잡한 집계 쿼리에서 NuVatis가 가장 효율적
-
----
-
-#### 7. Bulk Operations 카테고리 상세
-
-![Bulk Operations](resources/images/7.png)
-
-**대량 데이터 처리:**
-- **D01** (BULK INSERT 100 rows): Dapper 14.40ms → **Dapper 승**
-- **D03** (BULK INSERT 10K rows): Dapper 24.55ms → **Dapper 승**
-- **D04** (BULK INSERT 100K rows): NuVatis 27.59ms → **NuVatis 승**
-- **D09** (Transaction Order+Items x10): Dapper 50.47ms → **Dapper 승**
-
-**결론**: Bulk 작업은 Dapper가 우위, 초대량(100K)에서는 NuVatis 경쟁력
-
----
-
-#### 8. Stress Tests 카테고리 상세
-
-![Stress Tests](resources/images/8.png)
-
-**극한 부하 테스트:**
-- **E01** (대량 조회 100K rows): NuVatis 64.12ms, Dapper 65.64ms, EF Core 137.76ms → **NuVatis 승**
-- **E02** (복잡 쿼리 1K회 반복): NuVatis 81.64ms, Dapper 84.77ms, EF Core 162.93ms → **NuVatis 승**
-- **E04** (동시성 100 connections): NuVatis 122.47ms, Dapper 124.55ms, EF Core 226.98ms
-- **E05** (메모리 압박 Large Result): NuVatis 139.01ms, Dapper 143.82ms, EF Core 260.09ms
-
-**결론**: 스트레스 상황에서 NuVatis가 가장 안정적, EF Core는 2배 느림
-
----
-
-#### 9. 추가 시나리오 Latency 비교
-
-![Additional Latency](resources/images/9.png)
-
-**더 많은 시나리오 비교:**
-- A01~B05: 이전과 동일한 패턴 확인
-- 일관성: NuVatis와 Dapper가 안정적, EF Core는 변동성 높음
-
----
-
-#### 10. 메모리 사용량 & GC 압박 분석
-
-![Memory & GC](resources/images/10.png)
+![Memory & GC](resources/images/9.png)
 
 **메모리 사용량 비교:**
-- **NuVatis**: 평균 44.0 MB, 최대 385.0 MB
-- **Dapper**: 평균 40.0 MB, 최대 350.0 MB (가장 효율적)
-- **EF Core**: 평균 60.0 MB, 최대 525.0 MB (1.5배 많음)
+- **NuVatis**: 평균 0.3 MB, 최대 6.8 MB
+- **Dapper**: 평균 0.3 MB, 최대 6.7 MB
+- **EF Core**: 평균 8.8 MB, 최대 202.3 MB (약 29배 높음)
 
 **GC 압박 분석 (Gen0/1/2):**
-- **NuVatis**: 243 / 59 / 32
-- **Dapper**: 298 / 51 / 26 (Gen0 많지만 Gen2 적음)
-- **EF Core**: 268 / 51 / 22
+- **NuVatis**: 15 / 2 / 0
+- **Dapper**: 14 / 2 / 0
+- **EF Core**: 149 / 45 / 0
 
-**결론**: 메모리 효율성 Dapper > NuVatis > EF Core, Change Tracking이 메모리 오버헤드 주범
+**리소스 프로파일:**
+- NuVatis와 Dapper: 거의 동일한 메모리 효율성
+- EF Core: Gen0 GC가 10배 이상 많음 (Change Tracking 오버헤드)
+- 최대 메모리 사용: EF Core가 압도적으로 높음
 
----
-
-#### 11. 성능 메트릭 종합 비교
-
-![Performance Metrics](resources/images/11.png)
-
-**6가지 성능 지표 종합:**
-1. **Latency (응답 시간)**: Dapper ≈ NuVatis < EF Core
-2. **Throughput (처리량)**: Dapper ≈ NuVatis > EF Core
-3. **Memory (메모리 사용)**: Dapper < NuVatis < EF Core
-4. **GC Pressure (GC 압박)**: 세 ORM 유사
-5. **Allocated/Op (작업당 할당)**: Dapper < NuVatis < EF Core
-6. **Consistency (일관성)**: Dapper ≈ NuVatis < EF Core
-
-**결론**: 전반적으로 Dapper와 NuVatis가 비슷하고, EF Core는 모든 지표에서 뒤처짐
+**결론**: 메모리 효율성에서 NuVatis ≈ Dapper >> EF Core, Change Tracking이 주요 오버헤드 원인
 
 ---
 
@@ -582,46 +610,51 @@ curl -X POST http://localhost:5000/api/orders \
 
 #### NuVatis 특성
 **강점:**
-- 복잡한 동적 SQL (Dapper 대비 코드 간결)
-- ResultMap의 강력한 매핑 (EF Core Include보다 빠름)
-- XML로 SQL 관리 (버전 관리, 재사용)
+- 종합 1위 (60개 중 29개 승리)
+- Simple CRUD와 Stress Tests에서 압도적
+- 복잡한 동적 SQL을 XML로 간결하게 관리
+- 메모리 효율성 우수 (0.3 MB)
 
 **약점:**
-- 단순 쿼리에서 Dapper보다 약간 느림
+- JOIN과 Aggregate에서 Dapper/EF Core에 밀림
 - 컴파일 타임 체크 부재 (XML)
 
 #### Dapper 특성
 **강점:**
-- 모든 시나리오에서 가장 빠름
-- 최소 메모리 사용
-- 단순 명확
+- JOIN Complexity와 Bulk Operations에서 우위
+- NuVatis와 동일한 메모리 효율성 (0.3 MB)
+- 단순 명확한 API
 
 **약점:**
-- 동적 SQL 수동 구성 (보일러플레이트)
+- 종합 2위 (60개 중 20개 승리)
+- 동적 SQL 수동 구성 필요
 - 복잡한 매핑 수동 처리
-- N+1 문제 수동 해결
 
 #### EF Core 특성
 **강점:**
+- Aggregate & Analytics에서 단순 집계 압도적 (5ms)
 - LINQ 타입 안전성
 - Change Tracking (업데이트 편리)
-- 마이그레이션 자동화
 
 **약점:**
-- 복잡 쿼리 비효율 (2배 느림)
-- 높은 메모리 사용 (4배)
+- 종합 3위 (60개 중 8개 승리)
+- 메모리 사용량 29배 높음 (8.8 MB)
+- GC 압박 10배 높음
 - AsNoTracking 필수
 
 ### 📌 권장 사용 시나리오
 
-| 시나리오 | 권장 ORM |
-|---------|---------|
-| 단순 CRUD | Dapper |
-| 복잡한 동적 검색 | **NuVatis** |
-| 복잡한 JOIN + 매핑 | **NuVatis** |
-| 대량 데이터 처리 | Dapper |
-| 도메인 모델 중심 | EF Core |
-| 레거시 DB 통합 | **NuVatis** |
+| 시나리오 | 권장 ORM | 이유 |
+|---------|---------|------|
+| Simple CRUD | **NuVatis** | 12개 중 8개 승리, 가장 빠름 |
+| JOIN Complexity | Dapper | 15개 중 다수 승리, 안정적 |
+| Aggregate (단순) | **EF Core** | 단순 집계 5ms로 압도적 |
+| Aggregate (복잡) | **NuVatis** | Window Functions, CTE 우수 |
+| Bulk Operations | Dapper | 소량~중량 Bulk에서 우위 |
+| Stress Tests | **NuVatis** | 5개 중 4개 승리, 안정적 |
+| 메모리 효율성 | NuVatis/Dapper | EF Core 대비 29배 효율적 |
+| 도메인 모델 중심 | EF Core | Change Tracking, LINQ |
+| 레거시 DB 통합 | **NuVatis** | XML 매퍼로 복잡한 SQL 관리 |
 
 ---
 
