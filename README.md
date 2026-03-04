@@ -163,11 +163,14 @@ nuvatis-sample/
 │       └── Program.cs
 ├── benchmarks/                           # 대규모 ORM 벤치마크
 │   ├── NuVatis.Benchmark.Core/
-│   ├── NuVatis.Benchmark.NuVatis/
+│   ├── BenchmarkNuVatis/
 │   ├── NuVatis.Benchmark.Dapper/
 │   ├── NuVatis.Benchmark.EfCore/
 │   ├── NuVatis.Benchmark.DataGen/
+│   ├── NuVatis.Benchmark.Dashboard/      # React 성능 대시보드
 │   └── NuVatis.Benchmark.Runner/
+├── tests/
+│   └── NuVatis.Sample.Tests/             # 단위/통합 테스트
 ├── database/
 │   ├── schema.sql                        # PostgreSQL 스키마
 │   └── seed.sql                          # 샘플 데이터
@@ -402,10 +405,10 @@ curl -X POST http://localhost:5000/api/orders \
 
 **NuVatis vs Dapper vs EF Core** 대규모 성능 비교
 
-- **데이터 규모**: ~70GB (100K users, 10M orders, 50M order_items 등 15개 테이블)
-- **시나리오**: 60개 (Simple CRUD, JOIN Complexity, Aggregate, Bulk Operations, Stress Tests)
+- **데이터 규모**: ~10GB (100K users, 5만 orders, 20만 order_items 등 8개 테이블)
+- **시나리오**: 57개 (Simple CRUD, JOIN Complexity, Aggregate, Bulk Operations, Stress Tests)
 - **측정 지표**: Latency (Mean, P95), Throughput (ops/sec), Memory, GC 압박
-- **환경**: PostgreSQL 14, .NET 10.0, Docker
+- **환경**: PostgreSQL 17, .NET 10.0, Docker
 
 ### 📊 벤치마크 결과 상세
 
@@ -414,9 +417,9 @@ curl -X POST http://localhost:5000/api/orders \
 ![Overview](resources/images/1.png)
 
 **종합 성능 지표:**
-- **NuVatis**: 평균 117.91ms, 843 ops/s, 0.3 MB, 29승/60시나리오
-- **Dapper**: 평균 127.33ms, 839 ops/s, 0.3 MB, 20승/60시나리오
-- **EF Core**: 평균 175.76ms, 565 ops/s, 8.8 MB, 8승/60시나리오
+- **NuVatis**: 평균 117.91ms, 843 ops/s, 0.3 MB, 29승/57시나리오
+- **Dapper**: 평균 127.33ms, 839 ops/s, 0.3 MB, 20승/57시나리오
+- **EF Core**: 평균 175.76ms, 565 ops/s, 8.8 MB, 8승/57시나리오
 
 **카테고리별 성능 비교 (레이더 차트):**
 - Cat A (Simple CRUD): NuVatis와 Dapper 우위, EF Core 뒤처짐
@@ -425,7 +428,7 @@ curl -X POST http://localhost:5000/api/orders \
 - Cat D (Bulk Operations): Dapper 우위
 - Cat E (Stress Tests): NuVatis 우위
 
-**결론**: NuVatis가 60개 시나리오 중 29개에서 승리하며 종합 1위, EF Core는 메모리 사용량이 29배 높음
+**결론**: NuVatis가 57개 시나리오 중 29개에서 승리하며 종합 1위, EF Core는 메모리 사용량이 29배 높음
 
 ---
 
@@ -442,7 +445,7 @@ curl -X POST http://localhost:5000/api/orders \
 
 **시나리오별 응답 시간 추세 (하단 그래프):**
 - A01~A12: 세 ORM 모두 안정적 (0~800ms 범위)
-- A13 피크: NuVatis/Dapper 약 2200ms, EF Core 약 1600ms
+- A12 피크: NuVatis/Dapper 약 2200ms, EF Core 약 1600ms
 - B01~B15: 대부분 1ms 미만으로 우수
 - D01~D10: 주요 성능 격차 구간 (600ms까지)
 - E01~E05: NuVatis/Dapper 1100ms, EF Core 1100ms로 비슷
@@ -610,7 +613,7 @@ curl -X POST http://localhost:5000/api/orders \
 
 #### NuVatis 특성
 **강점:**
-- 종합 1위 (60개 중 29개 승리)
+- 종합 1위 (57개 중 29개 승리)
 - Simple CRUD와 Stress Tests에서 압도적
 - 복잡한 동적 SQL을 XML로 간결하게 관리
 - 메모리 효율성 우수 (0.3 MB)
@@ -626,7 +629,7 @@ curl -X POST http://localhost:5000/api/orders \
 - 단순 명확한 API
 
 **약점:**
-- 종합 2위 (60개 중 20개 승리)
+- 종합 2위 (57개 중 20개 승리)
 - 동적 SQL 수동 구성 필요
 - 복잡한 매핑 수동 처리
 
@@ -637,7 +640,7 @@ curl -X POST http://localhost:5000/api/orders \
 - Change Tracking (업데이트 편리)
 
 **약점:**
-- 종합 3위 (60개 중 8개 승리)
+- 종합 3위 (57개 중 8개 승리)
 - 메모리 사용량 29배 높음 (8.8 MB)
 - GC 압박 10배 높음
 - AsNoTracking 필수
