@@ -53,6 +53,9 @@ public class CategoryE_StressTestsBenchmarks
     private IOrderRepository _orderDapper = null!;
     // EfCore는 동시성 문제로 인해 각 메서드에서 별도 생성
 
+    // E03/E05 동시성 벤치마크에서 Task별 독립 세션 생성에 사용
+    private ISqlSessionFactory _nuvatisFactory = null!;
+
     private string _connectionString = null!;
 
     [GlobalSetup]
@@ -83,6 +86,11 @@ public class CategoryE_StressTestsBenchmarks
         var nuvatisMapperFactories = new Dictionary<Type, Func<ISqlSession, object>>();
         NuVatis.NuVatisMapperRegistry.RegisterAll(nuvatisFactory, (type, factory) => nuvatisMapperFactories[type] = factory);
         nuvatisFactory.SetMapperFactory((type, session) => nuvatisMapperFactories[type](session));
+        // <where><if> 런타임 확장 인터셉터 (IUserMapper.SearchAsync, IOrderMapper.SearchAsync 동작에 필수)
+        nuvatisFactory.AddInterceptor(new WhereIfExpandInterceptor());
+        // <foreach> 런타임 확장 인터셉터 (IUserMapper.BulkInsertAsync 동작에 필수)
+        nuvatisFactory.AddInterceptor(new ForeachExpandInterceptor());
+        _nuvatisFactory = nuvatisFactory;
         var nuvatisSession = nuvatisFactory.OpenSession(autoCommit: true);
         _userNuvatis = new NuVatisUserRepository(nuvatisSession.GetMapper<IUserMapper>());
         _orderNuvatis = new NuVatisOrderRepository(nuvatisSession.GetMapper<IOrderMapper>());
@@ -367,7 +375,13 @@ public class CategoryE_StressTestsBenchmarks
         for (int i = 0; i < 50; i++)
         {
             int userId = 12345 + i;
-            tasks.Add(Task.Run(async () => await _userNuvatis.GetByIdAsync(userId)));
+            tasks.Add(Task.Run(async () =>
+            {
+                // ISqlSession은 스레드 안전하지 않으므로 Task마다 독립 세션 생성
+                using var session = _nuvatisFactory.OpenSession(autoCommit: true);
+                var repo = new NuVatisUserRepository(session.GetMapper<IUserMapper>());
+                await repo.GetByIdAsync(userId);
+            }));
         }
         await Task.WhenAll(tasks);
     }
@@ -496,7 +510,13 @@ public class CategoryE_StressTestsBenchmarks
         for (int i = 0; i < 100; i++)
         {
             int userId = 12345 + i;
-            tasks.Add(Task.Run(async () => await _userNuvatis.GetByIdAsync(userId)));
+            tasks.Add(Task.Run(async () =>
+            {
+                // ISqlSession은 스레드 안전하지 않으므로 Task마다 독립 세션 생성
+                using var session = _nuvatisFactory.OpenSession(autoCommit: true);
+                var repo = new NuVatisUserRepository(session.GetMapper<IUserMapper>());
+                await repo.GetByIdAsync(userId);
+            }));
         }
         await Task.WhenAll(tasks);
     }

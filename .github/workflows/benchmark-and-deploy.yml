@@ -1,0 +1,135 @@
+name: Benchmark & Deploy Dashboard
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  # ============================================================
+  # Job 1: 벤치마크 실행
+  # PostgreSQL 서비스 컨테이너를 띄우고 전 카테고리 벤치마크 실행
+  # ============================================================
+  benchmark:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: bee_db
+          POSTGRES_USER: bee
+          POSTGRES_PASSWORD: ${{ secrets.BENCHMARK_DB_PASSWORD }}
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    defaults:
+      run:
+        working-directory: benchmarks/NuVatis.Benchmark.Runner
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET 8
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      # appsettings.json은 .gitignore 대상이므로 CI에서 생성
+      - name: Create appsettings.json
+        run: |
+          cat > appsettings.json << EOF
+          {
+            "ConnectionStrings": {
+              "BenchmarkDb": "Host=localhost;Port=5432;Database=bee_db;Username=bee;Password=${DB_PASSWORD};SearchPath=nuvatest"
+            }
+          }
+          EOF
+        env:
+          DB_PASSWORD: ${{ secrets.BENCHMARK_DB_PASSWORD }}
+
+      # BenchmarkDotNet isolated process는 Scripts/ 디렉토리에 접근 불가하므로
+      # 벤치마크 실행 전에 psql로 직접 스키마와 데이터를 초기화한다.
+      # GlobalSetup의 CheckDataExistsAsync가 true를 반환하면 스크립트 실행을 건너뜀.
+      - name: Initialize database schema
+        run: psql -h localhost -U bee -d bee_db -f Scripts/init-schema.sql
+        env:
+          PGPASSWORD: ${{ secrets.BENCHMARK_DB_PASSWORD }}
+
+      - name: Generate test data (~480K rows)
+        run: psql -h localhost -U bee -d bee_db -f Scripts/generate-testdata.sql
+        env:
+          PGPASSWORD: ${{ secrets.BENCHMARK_DB_PASSWORD }}
+        timeout-minutes: 15
+
+      - name: Build
+        run: dotnet build -c Release
+
+      # Console.ReadLine() 입력으로 "0"을 전달 → 전 카테고리(A~E) 실행
+      - name: Run benchmarks (all categories)
+        run: echo "0" | dotnet run -c Release --no-build
+        timeout-minutes: 90
+
+      - name: Upload benchmark results
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-results
+          path: benchmarks/NuVatis.Benchmark.Runner/BenchmarkDotNet.Artifacts/results/*-report-full.json
+          if-no-files-found: error
+
+  # ============================================================
+  # Job 2: 대시보드 빌드 & GitHub Pages 배포
+  # ============================================================
+  deploy-dashboard:
+    needs: benchmark
+    runs-on: ubuntu-latest
+
+    permissions:
+      pages: write
+      id-token: write
+
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      # 벤치마크 결과 JSON을 대시보드 public 폴더로 배치
+      - name: Download benchmark results
+        uses: actions/download-artifact@v4
+        with:
+          name: benchmark-results
+          path: benchmarks/NuVatis.Benchmark.Dashboard/public
+
+      - name: Install dependencies
+        working-directory: benchmarks/NuVatis.Benchmark.Dashboard
+        run: npm install
+
+      # GitHub Pages 서브경로 /nuvatis-sample/ 에 맞춰 base 설정
+      - name: Build dashboard
+        working-directory: benchmarks/NuVatis.Benchmark.Dashboard
+        run: npm run build -- --base /nuvatis-sample/
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: benchmarks/NuVatis.Benchmark.Dashboard/dist
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
