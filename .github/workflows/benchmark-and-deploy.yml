@@ -123,7 +123,7 @@ jobs:
       # GitHub Pages 서브경로 /nuvatis-sample/ 에 맞춰 base 설정
       - name: Build dashboard
         working-directory: benchmarks/NuVatis.Benchmark.Dashboard
-        run: npm run build -- --base /nuvatis-sample/
+        run: npx vite build --base /nuvatis-sample/
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3

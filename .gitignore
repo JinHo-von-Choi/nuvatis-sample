@@ -56,6 +56,9 @@ postgres_data/
 # Benchmark DB credentials (appsettings.example.json을 템플릿으로 사용)
 benchmarks/NuVatis.Benchmark.Runner/appsettings.json
 
+# Node.js
+node_modules/
+
 # Logs
 logs/
 *.log
