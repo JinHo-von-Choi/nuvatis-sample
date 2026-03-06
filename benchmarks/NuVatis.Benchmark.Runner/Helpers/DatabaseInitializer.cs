@@ -1,6 +1,7 @@
 using Npgsql;
 using NuVatis.Statement;
 using System.Diagnostics;
+using System.Text;
 using System.Xml.Linq;
 
 namespace NuVatis.Benchmark.Runner.Helpers;
@@ -13,6 +14,57 @@ namespace NuVatis.Benchmark.Runner.Helpers;
  */
 public static class DatabaseInitializer
 {
+    /**
+     * <foreach> 템플릿 정보 (LoadXmlMappers 파싱 결과)
+     *
+     * ForeachExpandInterceptor가 BeforeExecute에서 이 딕셔너리를 조회하여
+     * __FOREACH_PLACEHOLDER__를 실제 SQL로 확장한다.
+     *
+     * 키: MappedStatement.FullId (namespace.id 형식)
+     */
+    public static readonly Dictionary<string, ForeachTemplateInfo> ForeachTemplates = new();
+
+    /**
+     * <foreach> XML 어트리뷰트 및 바디 정보를 담는 레코드
+     */
+    public sealed class ForeachTemplateInfo
+    {
+        public required string CollectionName { get; init; }
+        public required string ItemName       { get; init; }
+        public required string Separator      { get; init; }
+        public required string BodyTemplate   { get; init; }
+    }
+
+    /**
+     * <where><if> 템플릿 정보 (LoadXmlMappers 파싱 결과)
+     *
+     * WhereIfExpandInterceptor가 BeforeExecute에서 이 딕셔너리를 조회하여
+     * __WHERE_PLACEHOLDER__를 실제 WHERE 절로 확장한다.
+     *
+     * 키: MappedStatement.FullId (namespace.id 형식)
+     */
+    public static readonly Dictionary<string, WhereTemplateInfo> WhereTemplates = new();
+
+    /**
+     * <where><if> 조건 목록을 담는 레코드
+     */
+    public sealed class WhereTemplateInfo
+    {
+        public required IReadOnlyList<WhereCondition> Conditions { get; init; }
+    }
+
+    /**
+     * 단일 <if> 조건을 담는 레코드
+     *
+     * TestExpression: <if test="..."> 어트리뷰트 값 (예: "UserName != null")
+     * SqlFragment:    <if> 바디 텍스트 (예: "AND user_name LIKE '%' || #{UserName} || '%'")
+     */
+    public sealed class WhereCondition
+    {
+        public required string TestExpression { get; init; }
+        public required string SqlFragment    { get; init; }
+    }
+
     /**
      * 스키마 및 테스트 데이터 초기화 (멱등성 보장)
      *
@@ -193,6 +245,12 @@ public static class DatabaseInitializer
                 { "delete", NuVatis.Statement.StatementType.Delete }
             };
 
+            // <sql id="..."> 프래그먼트를 미리 수집하여 <include refid="..."/> 확장에 사용한다.
+            var sqlFragments = mapper.Elements()
+                .Where(e => e.Name.LocalName == "sql")
+                .Where(e => !string.IsNullOrEmpty(e.Attribute("id")?.Value))
+                .ToDictionary(e => e.Attribute("id")!.Value, e => e.Value.Trim());
+
             foreach (var element in mapper.Elements())
             {
                 if (!elementTypeMap.TryGetValue(element.Name.LocalName, out var statementType))
@@ -203,7 +261,112 @@ public static class DatabaseInitializer
                     continue;
 
                 var resultMapId = element.Attribute("resultMap")?.Value;
-                var sqlSource   = element.Value.Trim();
+                var fullId      = ns + "." + id;
+
+                // <foreach>, <where> 자식 요소를 감지하여 플레이스홀더 방식으로 처리한다.
+                // element.Value.Trim()은 모든 자식 텍스트를 연결하므로 동적 SQL 태그가
+                // 제거되어 깨진 SQL이 만들어진다.
+                //
+                // <foreach>: VALUES 반복이 단 1건으로 축소되고 item.Property 바인딩 실패
+                // <where><if>: WHERE 키워드 없이 AND로 시작하는 구문 오류 SQL 생성
+                //
+                // 해결: 각 동적 태그를 __*_PLACEHOLDER__로 대체하고
+                // 대응 인터셉터(BeforeExecute)에서 런타임에 실제 SQL로 확장한다.
+                var foreachEl = element.Elements().FirstOrDefault(e => e.Name.LocalName == "foreach");
+                var whereEl   = element.Elements().FirstOrDefault(e => e.Name.LocalName == "where");
+                string sqlSource;
+
+                if (foreachEl != null)
+                {
+                    // <foreach> 이전/이후 텍스트를 추출하고 플레이스홀더를 삽입한다.
+                    var beforeForeach = new StringBuilder();
+                    var afterForeach  = new StringBuilder();
+                    bool pastForeach  = false;
+
+                    foreach (var node in element.Nodes())
+                    {
+                        if (node is XText textNode)
+                        {
+                            if (!pastForeach) beforeForeach.Append(textNode.Value);
+                            else             afterForeach.Append(textNode.Value);
+                        }
+                        else if (node is XElement childEl && childEl.Name.LocalName == "foreach")
+                        {
+                            pastForeach = true;
+                        }
+                    }
+
+                    sqlSource = beforeForeach.ToString().TrimEnd()
+                                + " __FOREACH_PLACEHOLDER__ "
+                                + afterForeach.ToString().TrimStart();
+
+                    ForeachTemplates[fullId] = new ForeachTemplateInfo
+                    {
+                        CollectionName = foreachEl.Attribute("collection")?.Value ?? "list",
+                        ItemName       = foreachEl.Attribute("item")?.Value       ?? "item",
+                        Separator      = foreachEl.Attribute("separator")?.Value  ?? ",",
+                        BodyTemplate   = foreachEl.Value.Trim()
+                    };
+                }
+                else if (whereEl != null)
+                {
+                    // <where> 이전/이후 텍스트를 추출하고 플레이스홀더를 삽입한다.
+                    // <where> 내부의 <if> 조건들을 test/fragment 쌍으로 저장한다.
+                    var beforeWhere = new StringBuilder();
+                    var afterWhere  = new StringBuilder();
+                    bool pastWhere  = false;
+
+                    foreach (var node in element.Nodes())
+                    {
+                        if (node is XText textNode)
+                        {
+                            if (!pastWhere) beforeWhere.Append(textNode.Value);
+                            else           afterWhere.Append(textNode.Value);
+                        }
+                        else if (node is XElement childEl && childEl.Name.LocalName == "where")
+                        {
+                            pastWhere = true;
+                        }
+                    }
+
+                    sqlSource = beforeWhere.ToString().TrimEnd()
+                                + " __WHERE_PLACEHOLDER__ "
+                                + afterWhere.ToString().TrimStart();
+
+                    // <where> 내부의 <if test="..."> 조건들을 순서대로 추출한다.
+                    var conditions = whereEl.Elements()
+                        .Where(e => e.Name.LocalName == "if")
+                        .Select(ifEl => new WhereCondition
+                        {
+                            TestExpression = ifEl.Attribute("test")?.Value ?? "false",
+                            SqlFragment    = ifEl.Value.Trim()
+                        })
+                        .ToList();
+
+                    WhereTemplates[fullId] = new WhereTemplateInfo
+                    {
+                        Conditions = conditions
+                    };
+                }
+                else
+                {
+                    // 노드별 순회로 <include refid="..."/>를 프래그먼트 텍스트로 치환한다.
+                    // element.Value.Trim()은 XElement 자식의 텍스트만 수집하여
+                    // <include> 같은 자식 요소의 기여가 사라진다.
+                    var sb = new StringBuilder();
+                    foreach (var node in element.Nodes())
+                    {
+                        if (node is XText textNode)
+                            sb.Append(textNode.Value);
+                        else if (node is XElement childEl && childEl.Name.LocalName == "include")
+                        {
+                            var refId = childEl.Attribute("refid")?.Value ?? "";
+                            if (sqlFragments.TryGetValue(refId, out var fragment))
+                                sb.Append(fragment);
+                        }
+                    }
+                    sqlSource = sb.ToString().Trim();
+                }
 
                 var statement = new MappedStatement {
                     Id          = id,
