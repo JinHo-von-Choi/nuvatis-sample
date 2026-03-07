@@ -1,10 +1,10 @@
 # NuVatis 샘플 프로젝트
 
-[![NuVatis Version](https://img.shields.io/badge/NuVatis-2.1.0-blue.svg)](https://www.nuget.org/packages/NuVatis.Core)
+[![NuVatis Version](https://img.shields.io/badge/NuVatis-2.3.0-blue.svg)](https://www.nuget.org/packages/NuVatis.Core)
 [![.NET](https://img.shields.io/badge/.NET-10.0-purple.svg)](https://dotnet.microsoft.com/)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
-**NuVatis 2.1.0**을 실증적으로 학습할 수 있는 종합 샘플 프로젝트입니다.
+**[NuVatis](https://github.com/JinHo-von-Choi/nuvatis) 2.3.0**을 실증적으로 학습할 수 있는 종합 샘플 프로젝트입니다.
 
 MyBatis 스타일의 XML 매퍼, 동적 SQL, ResultMap(association/collection), 트랜잭션, ASP.NET Core 통합, 그리고 **Dapper, EF Core와의 대규모 성능 비교**까지 모든 것을 다룹니다.
 
@@ -31,7 +31,7 @@ MyBatis 스타일의 XML 매퍼, 동적 SQL, ResultMap(association/collection), 
 
 ## 📖 프로젝트 소개
 
-NuVatis는 **.NET을 위한 MyBatis 스타일 SQL 매퍼 프레임워크**입니다.
+NuVatis는 **.NET을 위한 MyBatis 스타일 SQL 매퍼 프레임워크**입니다. EF Core 기반 통계 서비스에서 OOM이 반복되는 환경을 개선하기 위해 시작된 프로젝트로, Roslyn Source Generator를 활용한 빌드타임 코드 생성으로 런타임 리플렉션 없이 동작합니다. Native AOT 완전 호환, WDAC(Windows Defender Application Control) 환경 지원이 특징입니다. 탄생 배경과 설계 동기는 [본 프로젝트 README](https://github.com/JinHo-von-Choi/nuvatis#why-nuvatis)에서 확인할 수 있습니다.
 
 이 샘플 프로젝트는 초보자부터 전문가까지 NuVatis의 모든 기능을 학습할 수 있도록 **상세한 주석**과 **실무 패턴**을 포함합니다.
 
@@ -611,12 +611,15 @@ curl -X POST http://localhost:5000/api/orders \
 
 ### 🏆 종합 결론
 
+NuVatis가 만들어진 계기는 EF Core의 Change Tracker가 유발하는 과도한 메모리 할당과 반복적인 OOM이었다. 벤치마크 결과가 이 문제를 수치로 확인해준다 -- EF Core의 평균 메모리 할당은 8.8 MB로 NuVatis/Dapper(0.3 MB)의 29배이며, 100회 반복 INSERT(A12)에서는 202 MB를 할당하여 NuVatis(636 KB) 대비 326배에 달한다. Gen0 GC 횟수 역시 EF Core가 149회로 NuVatis(15회)의 10배다. 서버 비용 절감이 절실한 환경에서 ORM 선택이 인프라 비용에 직결되는 사례다.
+
 #### NuVatis 특성
 **강점:**
 - 종합 1위 (57개 중 29개 승리)
 - Simple CRUD와 Stress Tests에서 압도적
 - 복잡한 동적 SQL을 XML로 간결하게 관리
 - 메모리 효율성 우수 (0.3 MB)
+- Native AOT 완전 호환 (.NET 8+), WDAC 환경 동작
 
 **약점:**
 - JOIN과 Aggregate에서 Dapper/EF Core에 밀림
@@ -658,6 +661,8 @@ curl -X POST http://localhost:5000/api/orders \
 | 메모리 효율성 | NuVatis/Dapper | EF Core 대비 29배 효율적 |
 | 도메인 모델 중심 | EF Core | Change Tracking, LINQ |
 | 레거시 DB 통합 | **NuVatis** | XML 매퍼로 복잡한 SQL 관리 |
+| Native AOT / WDAC 환경 | **NuVatis** | 빌드타임 코드 생성, 런타임 IL Emit 없음 |
+| Java MyBatis 팀의 .NET 전환 | **NuVatis** | XML 매퍼 문법 동일, 쿼리 패턴 통일 가능 |
 
 ---
 
