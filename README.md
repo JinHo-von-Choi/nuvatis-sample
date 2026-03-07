@@ -44,12 +44,11 @@ NuVatis는 **.NET을 위한 MyBatis 스타일 SQL 매퍼 프레임워크**입니
 5. **ASP.NET Core 통합**: Dependency Injection, Health Check
 6. **성능 비교**: NuVatis vs Dapper vs EF Core 실증 벤치마크
 
-### 🎯 이 프로젝트가 특별한 이유
+### 🎯 특징
 
-- **상세한 주석**: 모든 XML 매퍼, Controller, Model에 500-1000줄의 교육용 주석
-- **실무 패턴**: Soft Delete, 가격 스냅샷, 주문 상태 FSM, 재고 동시성 제어
-- **대규모 벤치마크**: 70GB 데이터, 18개 시나리오, 3개 ORM 비교
-- **즉시 실행 가능**: Docker Compose로 1분 안에 실행
+- Soft Delete, 가격 스냅샷, 주문 상태 FSM, 재고 동시성 제어 등 실무 패턴 포함
+- NuVatis vs Dapper vs EF Core 57개 시나리오 벤치마크
+- Docker Compose로 즉시 실행 가능
 
 ---
 
@@ -139,7 +138,7 @@ NuVatis는 **.NET을 위한 MyBatis 스타일 SQL 매퍼 프레임워크**입니
 nuvatis-sample/
 ├── src/
 │   ├── NuVatis.Sample.Core/              # 공통 라이브러리
-│   │   ├── Models/                       # 엔티티 (극도로 상세한 주석)
+│   │   ├── Models/                       # 엔티티
 │   │   │   ├── User.cs
 │   │   │   ├── Product.cs
 │   │   │   ├── Order.cs
@@ -149,14 +148,14 @@ nuvatis-sample/
 │   │   │   ├── IUserMapper.cs
 │   │   │   ├── IOrderMapper.cs
 │   │   │   ├── IProductMapper.cs
-│   │   │   └── Xml/                      # XML 매퍼 (극도로 상세한 주석)
-│   │   │       ├── IUserMapper.xml       (~600줄 주석)
-│   │   │       ├── IProductMapper.xml    (~500줄 주석)
-│   │   │       └── IOrderMapper.xml      (~700줄 주석)
+│   │   │   └── Xml/                      # XML 매퍼
+│   │   │       ├── IUserMapper.xml
+│   │   │       ├── IProductMapper.xml
+│   │   │       └── IOrderMapper.xml
 │   ├── NuVatis.Sample.Console/           # 콘솔 앱 예제
 │   │   └── Program.cs
 │   └── NuVatis.Sample.WebApi/            # ASP.NET Core Web API
-│       ├── Controllers/                  # 극도로 상세한 주석
+│       ├── Controllers/
 │       │   ├── UsersController.cs
 │       │   ├── ProductsController.cs
 │       │   └── OrdersController.cs
